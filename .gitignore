@@ -8,3 +8,4 @@
 app/build/
 app/release
 app_config.json
+/tools/
