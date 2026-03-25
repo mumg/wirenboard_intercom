@@ -3,12 +3,14 @@ package net.muratov.intercom.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import net.muratov.intercom.AppContainer
 import net.muratov.intercom.data.model.CallSession
+import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.data.model.SipAccountState
 import net.muratov.intercom.provider.myhome.MyHomeAuthStatus
@@ -91,6 +93,16 @@ class MainViewModel(
 
     fun startMainIfNeeded() {
         container.startMainIfNeeded()
+    }
+
+    fun canOpen(action: ProviderOpenAction): Boolean {
+        return container.canOpen(action)
+    }
+
+    fun open(action: ProviderOpenAction) {
+        viewModelScope.launch {
+            container.open(action)
+        }
     }
 }
 

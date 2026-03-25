@@ -9,11 +9,13 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import net.muratov.intercom.data.provider.ConfigSipAccountDataProvider
 import net.muratov.intercom.data.provider.ConfigStreamDataProvider
+import net.muratov.intercom.data.provider.IntercomProvider
 import net.muratov.intercom.data.provider.ProptechSipAccountDataProvider
 import net.muratov.intercom.data.provider.ProptechStreamDataProvider
 import net.muratov.intercom.data.repository.AppConfigLoader
 import net.muratov.intercom.data.repository.SipAccountRepository
 import net.muratov.intercom.data.repository.StreamRepository
+import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.provider.myhome.MyHomeProptechService
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
 import net.muratov.intercom.voip.SafeSipService
@@ -33,28 +35,29 @@ class MainApplication : Application() {
             this,
             config.myHomeProptech.copy(enabled = config.myHomeProptech.enabled && hasProptechConsumers),
         )
+        val providers: List<IntercomProvider> = listOf(
+            ConfigStreamDataProvider("config"),
+            ConfigStreamDataProvider("rtsp"),
+            ConfigSipAccountDataProvider(),
+            ProptechStreamDataProvider(myHomeProviderService),
+            ProptechSipAccountDataProvider(myHomeProviderService),
+        )
         appContainer = AppContainer(
             webViewUrl = config.webViewUrl,
             streamRepository = StreamRepository(
                 sources = config.streams,
-                providers = listOf(
-                    ConfigStreamDataProvider("config"),
-                    ConfigStreamDataProvider("rtsp"),
-                    ProptechStreamDataProvider(myHomeProviderService),
-                ),
+                providers = providers,
                 myHomeProviderService = myHomeProviderService,
             ),
             sipAccountRepository = SipAccountRepository(
                 sources = config.sipAccounts,
-                providers = listOf(
-                    ConfigSipAccountDataProvider(),
-                    ProptechSipAccountDataProvider(myHomeProviderService),
-                ),
+                providers = providers,
                 myHomeProviderService = myHomeProviderService,
             ),
             myHomeProviderService = myHomeProviderService,
             sipService = SafeSipService(this),
             proptechWizardRequired = hasProptechConsumers,
+            providers = providers,
         )
     }
 }
@@ -66,6 +69,7 @@ data class AppContainer(
     val myHomeProviderService: MyHomeProviderService,
     val sipService: SipService,
     val proptechWizardRequired: Boolean,
+    private val providers: List<IntercomProvider>,
 ) {
     private val registrationStarted = AtomicBoolean(false)
     private val mainStarted = AtomicBoolean(false)
@@ -86,6 +90,12 @@ data class AppContainer(
         myHomeProviderService.start()
     }
 
+    fun canOpen(action: ProviderOpenAction): Boolean {
+        return providers.any { provider ->
+            provider.type == action.providerType && provider.canOpen(action)
+        }
+    }
+
     fun startMainIfNeeded() {
         if (mainStarted.compareAndSet(false, true)) {
             runCatching {
@@ -99,5 +109,13 @@ data class AppContainer(
                 Log.e("AppContainer", "Failed to start SIP service", error)
             }
         }
+    }
+
+    suspend fun open(action: ProviderOpenAction): Boolean {
+        for (provider in providers) {
+            if (provider.type != action.providerType) continue
+            if (provider.open(action)) return true
+        }
+        return false
     }
 }

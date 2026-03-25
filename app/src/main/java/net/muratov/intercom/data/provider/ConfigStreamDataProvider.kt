@@ -5,8 +5,8 @@ import net.muratov.intercom.data.model.StreamSourceConfig
 
 class ConfigStreamDataProvider(
     override val type: String = "rtsp",
-) : StreamDataProvider {
-    override suspend fun resolve(source: StreamSourceConfig): RtspStream? {
+) : IntercomProvider {
+    override suspend fun resolveStream(source: StreamSourceConfig): RtspStream? {
         val provider = source.provider
         val rtspUrl = provider.rtspUrl ?: provider.url
         val previewUrl = provider.previewUrl

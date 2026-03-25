@@ -23,6 +23,7 @@ data class SipAccountConfig(
     val port: Int = 5060,
     val transport: SipTransport = SipTransport.UDP,
     val displayName: String = title,
+    val openAction: ProviderOpenAction? = null,
 )
 
 data class SipAccountState(
@@ -43,4 +44,5 @@ data class CallSession(
     val hasVideo: Boolean,
     val direction: CallDirection,
     val stateLabel: String,
+    val openAction: ProviderOpenAction? = null,
 )

@@ -1,5 +1,6 @@
 package net.muratov.intercom.data.provider
 
+import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.data.model.SipAccountConfig
 import net.muratov.intercom.data.model.SipAccountSourceConfig
 import net.muratov.intercom.data.model.SipTransport
@@ -8,10 +9,16 @@ import net.muratov.intercom.provider.myhome.MyHomeProviderService
 
 class ProptechSipAccountDataProvider(
     private val providerService: MyHomeProviderService,
-) : SipAccountDataProvider {
+) : IntercomProvider {
     override val type: String = "proptech"
 
-    override suspend fun resolve(source: SipAccountSourceConfig): SipAccountConfig? {
+    override fun canOpen(action: ProviderOpenAction): Boolean {
+        return action.providerType == type &&
+            action.targetId.isNotBlank() &&
+            action.extras["placeId"]?.toLongOrNull() != null
+    }
+
+    override suspend fun resolveSipAccount(source: SipAccountSourceConfig): SipAccountConfig? {
         val state = providerService.state.value
         if (state.tokens == null) return null
         val placeId = state.selectedPlaceId ?: return null
@@ -28,7 +35,19 @@ class ProptechSipAccountDataProvider(
             port = source.provider.port,
             transport = source.provider.transport.takeIf { it != SipTransport.UDP } ?: SipTransport.UDP,
             displayName = source.provider.displayName.ifBlank { title },
+            openAction = ProviderOpenAction(
+                providerType = type,
+                targetId = accessControl.id.toString(),
+                extras = mapOf("placeId" to placeId.toString()),
+            ),
         )
+    }
+
+    override suspend fun open(action: ProviderOpenAction): Boolean {
+        if (!canOpen(action)) return false
+        val placeId = action.extras["placeId"]?.toLongOrNull() ?: return false
+        val accessControlId = action.targetId.toLongOrNull() ?: return false
+        return providerService.executeAccessControlAction(placeId, accessControlId).status
     }
 
     private fun selectAccessControl(

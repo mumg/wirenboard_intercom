@@ -8,4 +8,5 @@ data class RtspStream(
     val previewUrl: String? = null,
     val previewReloadPeriodMs: Long? = null,
     val previewExtras: Map<String, String> = emptyMap(),
+    val openAction: ProviderOpenAction? = null,
 )

@@ -11,12 +11,12 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.data.model.StreamSourceConfig
-import net.muratov.intercom.data.provider.StreamDataProvider
+import net.muratov.intercom.data.provider.IntercomProvider
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
 
 class StreamRepository(
     private val sources: List<StreamSourceConfig>,
-    private val providers: List<StreamDataProvider>,
+    private val providers: List<IntercomProvider>,
     myHomeProviderService: MyHomeProviderService,
 ) {
     companion object {
@@ -40,7 +40,13 @@ class StreamRepository(
     suspend fun refresh() {
         _streams.value = sources.mapNotNull { source ->
             runCatching {
-                providers.firstOrNull { it.type == source.provider.type }?.resolve(source)
+                var resolved: RtspStream? = null
+                for (provider in providers) {
+                    if (provider.type != source.provider.type) continue
+                    resolved = provider.resolveStream(source)
+                    if (resolved != null) break
+                }
+                resolved
             }.onFailure { error ->
                 Log.w(TAG, "Unable to resolve stream ${source.id}", error)
             }.getOrNull()

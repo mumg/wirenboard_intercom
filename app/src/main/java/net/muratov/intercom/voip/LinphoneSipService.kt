@@ -24,6 +24,7 @@ import org.linphone.core.Config
 import org.linphone.core.Core
 import org.linphone.core.CoreListenerStub
 import org.linphone.core.Factory
+import org.linphone.core.MediaDirection
 import org.linphone.core.PayloadType
 import org.linphone.core.RegistrationState
 import org.linphone.core.VideoActivationPolicy
@@ -46,6 +47,7 @@ class LinphoneSipService(
     private val factory = Factory.instance()
     private val started = AtomicBoolean(false)
     private val accountMap = ConcurrentHashMap<String, Account>()
+    private val accountConfigByUsername = ConcurrentHashMap<String, SipAccountConfig>()
     private var startupFailure: Throwable? = null
 
     private val _accountStates = MutableStateFlow<List<SipAccountState>>(emptyList())
@@ -62,7 +64,7 @@ class LinphoneSipService(
 
     private val core: Core by lazy {
         createSafeCore().apply {
-            isVideoCaptureEnabled = true
+            isVideoCaptureEnabled = false
             isVideoDisplayEnabled = true
             configureVideoSafety()
             addListener(coreListener)
@@ -105,6 +107,7 @@ class LinphoneSipService(
         val call = currentCall ?: return
         val params: CallParams = core.createCallParams(call) ?: return
         params.isVideoEnabled = true
+        params.videoDirection = MediaDirection.RecvOnly
         call.acceptWithParams(params)
     }
 
@@ -138,9 +141,11 @@ class LinphoneSipService(
     private fun registerAccounts(core: Core, accounts: List<SipAccountConfig>) {
         accountMap.values.forEach(core::removeAccount)
         accountMap.clear()
+        accountConfigByUsername.clear()
         core.clearAllAuthInfo()
 
         accounts.forEach { config ->
+            accountConfigByUsername[config.username] = config
             val authInfo = factory.createAuthInfo(
                 config.username,
                 null,
@@ -224,7 +229,7 @@ class LinphoneSipService(
 
             val policy = getVideoActivationPolicy()
             policy.automaticallyAccept = true
-            policy.automaticallyInitiate = true
+            policy.automaticallyInitiate = false
             setVideoActivationPolicy(policy)
         }.onFailure { error ->
             Log.w(TAG, "Unable to apply safe video codec policy", error)
@@ -254,6 +259,12 @@ class LinphoneSipService(
 
     private fun updateCallStates(call: Call, state: Call.State) {
         currentCall = call
+        val localIdentity = when (call.dir) {
+            Call.Dir.Incoming -> call.toAddress.username
+            Call.Dir.Outgoing -> null
+            else -> null
+        }
+        val accountConfig = localIdentity?.let(accountConfigByUsername::get)
         val session = CallSession(
             callId = call.callLog.callId ?: "call",
             remoteDisplayName = call.remoteAddress.displayName ?: call.remoteAddress.username.orEmpty(),
@@ -261,12 +272,16 @@ class LinphoneSipService(
             hasVideo = call.currentParams.isVideoEnabled || call.remoteParams?.isVideoEnabled == true,
             direction = if (call.dir == Call.Dir.Incoming) CallDirection.Incoming else CallDirection.Outgoing,
             stateLabel = state.name,
+            openAction = accountConfig?.openAction,
         )
 
         when (state) {
             Call.State.IncomingReceived,
             Call.State.IncomingEarlyMedia,
             Call.State.UpdatedByRemote -> {
+                if (state == Call.State.IncomingReceived) {
+                    ensureIncomingEarlyMedia(call)
+                }
                 _incomingCall.value = session
                 if (remoteTextureView != null) {
                     core.nativeVideoWindowId = remoteTextureView
@@ -297,6 +312,18 @@ class LinphoneSipService(
         _incomingCall.value = null
         _activeCall.value = null
         currentCall = null
+    }
+
+    private fun ensureIncomingEarlyMedia(call: Call) {
+        val core = getCoreOrNull() ?: return
+        runCatching {
+            val params = core.createCallParams(call) ?: return
+            params.isVideoEnabled = true
+            params.videoDirection = MediaDirection.RecvOnly
+            call.acceptEarlyMediaWithParams(params)
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to accept incoming early media", error)
+        }
     }
 
     private val coreListener = object : CoreListenerStub() {

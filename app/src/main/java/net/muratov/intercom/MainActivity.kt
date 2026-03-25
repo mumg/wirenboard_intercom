@@ -123,27 +123,39 @@ private fun IntercomApp(
             )
 
             if (selectedStream != null) {
+                val openAction = selectedStream.openAction?.takeIf(viewModel::canOpen)
                 FullscreenStreamOverlay(
                     stream = selectedStream,
                     onDismiss = { selectedStreamId = null },
+                    onOpen = openAction?.let { action ->
+                        { viewModel.open(action) }
+                    },
                 )
             }
 
             uiState.incomingCall?.let { call ->
+                val openAction = call.openAction?.takeIf(viewModel::canOpen)
                 IncomingCallOverlay(
                     callSession = call,
                     sipService = appContainer.sipService,
                     onAccept = viewModel::answerIncomingCall,
                     onReject = viewModel::rejectIncomingCall,
+                    onOpen = openAction?.let { action ->
+                        { viewModel.open(action) }
+                    },
                 )
             }
 
             if (uiState.incomingCall == null) {
                 uiState.activeCall?.let { call ->
+                    val openAction = call.openAction?.takeIf(viewModel::canOpen)
                     ActiveCallOverlay(
                         callSession = call,
                         sipService = appContainer.sipService,
                         onHangup = viewModel::endActiveCall,
+                        onOpen = openAction?.let { action ->
+                            { viewModel.open(action) }
+                        },
                     )
                 }
             }
@@ -173,10 +185,11 @@ private fun IntercomApp(
 private fun FullscreenStreamOverlay(
     stream: RtspStream,
     onDismiss: () -> Unit,
+    onOpen: (() -> Unit)? = null,
 ) {
     BackHandler(onBack = onDismiss)
     Box(modifier = Modifier.fillMaxSize()) {
-        FullscreenStreamScreen(stream = stream)
+        FullscreenStreamScreen(stream = stream, onOpen = onOpen)
     }
 }
 

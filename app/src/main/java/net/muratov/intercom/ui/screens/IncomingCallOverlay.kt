@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +38,7 @@ fun IncomingCallOverlay(
     sipService: SipService,
     onAccept: () -> Unit,
     onReject: () -> Unit,
+    onOpen: (() -> Unit)? = null,
 ) {
     val textureViewHolder = remember { arrayOfNulls<TextureView>(1) }
 
@@ -103,6 +105,15 @@ fun IncomingCallOverlay(
                 containerColor = Color(0xFFC73A3A),
             ) {
                 Icon(Icons.Default.CallEnd, contentDescription = null, tint = Color.White)
+            }
+            if (onOpen != null && callSession.openAction != null) {
+                FloatingActionButton(
+                    onClick = onOpen,
+                    shape = CircleShape,
+                    containerColor = Color(0xFF2C8A5B),
+                ) {
+                    Icon(Icons.Default.Lock, contentDescription = "Open", tint = Color.White)
+                }
             }
             FloatingActionButton(
                 onClick = onAccept,

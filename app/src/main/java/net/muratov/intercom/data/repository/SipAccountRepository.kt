@@ -11,12 +11,12 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import net.muratov.intercom.data.model.SipAccountConfig
 import net.muratov.intercom.data.model.SipAccountSourceConfig
-import net.muratov.intercom.data.provider.SipAccountDataProvider
+import net.muratov.intercom.data.provider.IntercomProvider
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
 
 class SipAccountRepository(
     private val sources: List<SipAccountSourceConfig>,
-    private val providers: List<SipAccountDataProvider>,
+    private val providers: List<IntercomProvider>,
     myHomeProviderService: MyHomeProviderService,
 ) {
     companion object {
@@ -40,7 +40,13 @@ class SipAccountRepository(
     suspend fun refresh() {
         _accounts.value = sources.mapNotNull { source ->
             runCatching {
-                providers.firstOrNull { it.type == source.provider.type }?.resolve(source)
+                var resolved: SipAccountConfig? = null
+                for (provider in providers) {
+                    if (provider.type != source.provider.type) continue
+                    resolved = provider.resolveSipAccount(source)
+                    if (resolved != null) break
+                }
+                resolved
             }.onFailure { error ->
                 Log.w(TAG, "Unable to resolve SIP account ${source.id}", error)
             }.getOrNull()

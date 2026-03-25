@@ -1,5 +1,6 @@
 package net.muratov.intercom.data.provider
 
+import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.data.model.StreamSourceConfig
 import net.muratov.intercom.provider.myhome.MyHomeAccessControl
@@ -9,10 +10,16 @@ import org.json.JSONObject
 
 class ProptechStreamDataProvider(
     private val providerService: MyHomeProviderService,
-) : StreamDataProvider {
+) : IntercomProvider {
     override val type: String = "proptech"
 
-    override suspend fun resolve(source: StreamSourceConfig): RtspStream? {
+    override fun canOpen(action: ProviderOpenAction): Boolean {
+        return action.providerType == type &&
+            action.targetId.isNotBlank() &&
+            action.extras["placeId"]?.toLongOrNull() != null
+    }
+
+    override suspend fun resolveStream(source: StreamSourceConfig): RtspStream? {
         val state = providerService.state.value
         val tokens = state.tokens ?: return null
         val placeId = state.selectedPlaceId ?: return null
@@ -42,7 +49,21 @@ class ProptechStreamDataProvider(
             previewUrl = previewUrl,
             previewReloadPeriodMs = source.provider.previewReloadPeriodMs ?: 15_000L,
             previewExtras = mapOf("Authorization" to tokens.authorizationHeader),
+            openAction = accessControl?.let {
+                ProviderOpenAction(
+                    providerType = type,
+                    targetId = it.id.toString(),
+                    extras = mapOf("placeId" to placeId.toString()),
+                )
+            },
         )
+    }
+
+    override suspend fun open(action: ProviderOpenAction): Boolean {
+        if (!canOpen(action)) return false
+        val placeId = action.extras["placeId"]?.toLongOrNull() ?: return false
+        val accessControlId = action.targetId.toLongOrNull() ?: return false
+        return providerService.executeAccessControlAction(placeId, accessControlId).status
     }
 
     private fun selectAccessControl(

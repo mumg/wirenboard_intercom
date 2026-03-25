@@ -3,10 +3,10 @@ package net.muratov.intercom.data.provider
 import net.muratov.intercom.data.model.SipAccountConfig
 import net.muratov.intercom.data.model.SipAccountSourceConfig
 
-class ConfigSipAccountDataProvider : SipAccountDataProvider {
+class ConfigSipAccountDataProvider : IntercomProvider {
     override val type: String = "config"
 
-    override suspend fun resolve(source: SipAccountSourceConfig): SipAccountConfig? {
+    override suspend fun resolveSipAccount(source: SipAccountSourceConfig): SipAccountConfig? {
         val provider = source.provider
         if (provider.username.isBlank() || provider.password.isBlank() || provider.domain.isBlank()) {
             return null
