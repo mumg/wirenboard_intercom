@@ -8,13 +8,11 @@ data class StreamSourceConfig(
 
 data class StreamProviderConfig(
     val type: String,
-    val url: String? = null,
-    val rtspUrl: String? = null,
+    val url: String,
     val rtspExtras: Map<String, String> = emptyMap(),
     val previewUrl: String? = null,
     val previewReloadPeriodMs: Long? = null,
     val previewExtras: Map<String, String> = emptyMap(),
-    val accessControlId: Long? = null,
     val cameraId: String? = null,
 )
 
@@ -32,5 +30,4 @@ data class SipAccountProviderConfig(
     val domain: String = "",
     val port: Int = 5060,
     val transport: SipTransport = SipTransport.UDP,
-    val accessControlId: Long? = null,
 )

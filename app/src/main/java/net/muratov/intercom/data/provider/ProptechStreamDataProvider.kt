@@ -29,23 +29,19 @@ class ProptechStreamDataProvider(
         val cameraResources = runCatching {
             providerService.getPlaceCameras(placeId) + providerService.getPlacePublicCameras(placeId)
         }.getOrDefault(emptyList())
-        val camera = selectCamera(source, cameraResources)
+        val camera = selectCamera(source, cameraResources, accessControl)
 
         val previewUrl = accessControl?.let {
             "${providerService.baseUrl}/rest/v1/places/$placeId/accesscontrols/${it.id}/videosnapshots"
         }
         val rtspUrl = camera?.extractRtspUrl()
-        if (previewUrl == null && rtspUrl == null) return null
+        if (rtspUrl.isNullOrBlank()) return null
 
         return RtspStream(
             id = source.id,
             title = source.title,
             rtspUrl = rtspUrl,
-            rtspExtras = buildMap {
-                if (rtspUrl != null) {
-                    put("Authorization", tokens.authorizationHeader)
-                }
-            },
+            rtspExtras = mapOf("Authorization" to tokens.authorizationHeader),
             previewUrl = previewUrl,
             previewReloadPeriodMs = source.provider.previewReloadPeriodMs ?: 15_000L,
             previewExtras = mapOf("Authorization" to tokens.authorizationHeader),
@@ -71,8 +67,6 @@ class ProptechStreamDataProvider(
         accessControls: List<MyHomeAccessControl>,
     ): MyHomeAccessControl? {
         return accessControls.firstOrNull { control ->
-            source.provider.accessControlId != null && control.id == source.provider.accessControlId
-        } ?: accessControls.firstOrNull { control ->
             control.name.equals(source.title, ignoreCase = true)
         } ?: accessControls.firstOrNull { control ->
             control.id.toString() == source.id
@@ -82,14 +76,19 @@ class ProptechStreamDataProvider(
     private fun selectCamera(
         source: StreamSourceConfig,
         cameras: List<MyHomeCameraResource>,
+        accessControl: MyHomeAccessControl?,
     ): MyHomeCameraResource? {
         return cameras.firstOrNull { camera ->
+            camera.matchesSelector(source.provider.url)
+        } ?: cameras.firstOrNull { camera ->
             source.provider.cameraId != null && camera.id == source.provider.cameraId
+        } ?: cameras.firstOrNull { camera ->
+            accessControl?.externalCameraId != null && camera.id == accessControl.externalCameraId
         } ?: cameras.firstOrNull { camera ->
             camera.title.equals(source.title, ignoreCase = true)
         } ?: cameras.firstOrNull { camera ->
             camera.id == source.id
-        }
+        } ?: cameras.singleOrNull()
     }
 }
 
@@ -97,4 +96,10 @@ private fun MyHomeCameraResource.extractRtspUrl(): String? {
     val json = JSONObject(rawJson)
     return listOf("rtspUrl", "rtsp_url", "streamUrl", "url")
         .firstNotNullOfOrNull { key -> json.optString(key).takeIf { it.isNotBlank() } }
+}
+
+private fun MyHomeCameraResource.matchesSelector(selector: String): Boolean {
+    return id.equals(selector, ignoreCase = true) ||
+        title.equals(selector, ignoreCase = true) ||
+        extractRtspUrl().equals(selector, ignoreCase = true)
 }

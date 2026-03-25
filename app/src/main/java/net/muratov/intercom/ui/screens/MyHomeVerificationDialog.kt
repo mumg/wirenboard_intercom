@@ -22,7 +22,7 @@ fun MyHomeVerificationDialog(
     prompt: MyHomeVerificationPrompt,
     message: String,
     onDismiss: () -> Unit,
-    onSubmit: (String) -> Unit,
+    onSubmit: (String, String) -> Unit,
 ) {
     var code by rememberSaveable { mutableStateOf("") }
 
@@ -55,7 +55,7 @@ fun MyHomeVerificationDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSubmit(code.trim()) },
+                onClick = { onSubmit(code.trim(), "") },
                 enabled = code.isNotBlank(),
             ) {
                 Text("Подтвердить")

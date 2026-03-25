@@ -92,7 +92,7 @@ class MyHomeProptechService(
                             status = MyHomeAuthStatus.SelectingContext,
                             contextSelectionPrompt = MyHomeContextSelectionPrompt(
                                 phone = config.phone,
-                                contexts = prioritizeLoginContexts(contexts),
+                                contexts = contexts,
                             ),
                             message = "Выберите адрес для авторизации",
                         )
@@ -141,7 +141,7 @@ class MyHomeProptechService(
         }
     }
 
-    override fun submitVerificationCode(code: String) {
+    override fun submitVerificationCode(code: String, confirmationSecret: String) {
         val context = selectedContext ?: return
         if (code.isBlank()) {
             _state.value = _state.value.copy(message = "Код не может быть пустым")
@@ -155,7 +155,7 @@ class MyHomeProptechService(
             )
 
             runCatching {
-                val issuedTokens = confirmAuth(context, code)
+                val issuedTokens = confirmAuth(context, code, confirmationSecret)
                 tokens = issuedTokens
                 persistSession(issuedTokens, context.placeId)
                 _state.value = MyHomeProviderState(
@@ -298,6 +298,7 @@ class MyHomeProptechService(
                 operatorId = item.optInt("operatorId"),
                 name = item.optString("name"),
                 type = item.optString("type"),
+                externalCameraId = item.optString("externalCameraId").takeIf { it.isNotBlank() },
                 allowOpen = item.optBoolean("allowOpen"),
                 allowVideo = item.optBoolean("allowVideo"),
                 previewAvailable = item.optBoolean("previewAvailable"),
@@ -404,8 +405,12 @@ class MyHomeProptechService(
         )
     }
 
-    private suspend fun confirmAuth(loginContext: MyHomeLoginContext, code: String): MyHomeTokens {
-        val confirm2 = config.confirmationSecret?.takeIf { it.isNotBlank() } ?: code
+    private suspend fun confirmAuth(
+        loginContext: MyHomeLoginContext,
+        code: String,
+        confirmationSecret: String,
+    ): MyHomeTokens {
+        val confirm2 = confirmationSecret.takeIf { it.isNotBlank() } ?: code
         val body = JSONObject().apply {
             put("operatorId", loginContext.operatorId)
             put("login", config.phone)
@@ -444,13 +449,6 @@ class MyHomeProptechService(
             selectedPlaceId = loginContext.placeId,
             message = "Код отправлен",
         )
-    }
-
-    private fun prioritizeLoginContexts(contexts: List<MyHomeLoginContext>): List<MyHomeLoginContext> {
-        return contexts.sortedByDescending { context ->
-            (config.preferredPlaceId == null || context.placeId == config.preferredPlaceId) &&
-                (config.preferredProfileId.isNullOrBlank() || context.profileId == config.preferredProfileId)
-        }
     }
 
     private fun requireTokens(): MyHomeTokens {

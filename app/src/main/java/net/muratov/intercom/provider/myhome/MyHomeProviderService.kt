@@ -8,7 +8,7 @@ interface MyHomeProviderService {
 
     fun start()
     fun selectLoginContext(context: MyHomeLoginContext)
-    fun submitVerificationCode(code: String)
+    fun submitVerificationCode(code: String, confirmationSecret: String)
     fun dismissVerificationPrompt()
 
     suspend fun getOperators(): List<MyHomeOperator>

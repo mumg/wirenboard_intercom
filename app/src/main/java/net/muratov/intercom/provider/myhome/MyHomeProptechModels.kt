@@ -4,9 +4,6 @@ data class MyHomeProptechConfig(
     val enabled: Boolean = false,
     val baseUrl: String = "https://myhome.proptech.ru",
     val phone: String = "",
-    val preferredPlaceId: Long? = null,
-    val preferredProfileId: String? = null,
-    val confirmationSecret: String? = null,
     val installationId: String = "intercom-android",
 )
 
@@ -91,6 +88,7 @@ data class MyHomeAccessControl(
     val operatorId: Int?,
     val name: String,
     val type: String?,
+    val externalCameraId: String?,
     val allowOpen: Boolean,
     val allowVideo: Boolean,
     val previewAvailable: Boolean,

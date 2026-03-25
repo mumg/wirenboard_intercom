@@ -71,8 +71,8 @@ class MainViewModel(
         container.sipService.endCurrentCall()
     }
 
-    fun submitVerificationCode(code: String) {
-        container.myHomeProviderService.submitVerificationCode(code)
+    fun submitVerificationCode(code: String, confirmationSecret: String) {
+        container.myHomeProviderService.submitVerificationCode(code, confirmationSecret)
     }
 
     fun selectLoginContext(context: MyHomeLoginContext) {

@@ -70,12 +70,12 @@ class AppConfigLoader(
                 StreamSourceConfig(
                     id = "cam-1",
                     title = "Entrance",
-                    provider = StreamProviderConfig(type = "rtsp", url = "rtsp://192.168.1.10:554/stream1"),
+                    provider = StreamProviderConfig(type = "config", url = "rtsp://192.168.1.10:554/stream1"),
                 ),
                 StreamSourceConfig(
                     id = "cam-2",
                     title = "Warehouse",
-                    provider = StreamProviderConfig(type = "rtsp", url = "rtsp://192.168.1.11:554/stream1"),
+                    provider = StreamProviderConfig(type = "config", url = "rtsp://192.168.1.11:554/stream1"),
                 ),
             ),
             sipAccounts = listOf(
@@ -114,26 +114,22 @@ class AppConfigLoader(
             enabled = true,
             baseUrl = provider.optString("baseUrl", "https://myhome.proptech.ru"),
             phone = provider.optString("phone"),
-            preferredPlaceId = provider.optLong("preferredPlaceId").takeIf { provider.has("preferredPlaceId") && it > 0L },
-            preferredProfileId = provider.optString("preferredProfileId").takeIf { it.isNotBlank() },
-            confirmationSecret = provider.optString("confirmationSecret").takeIf { it.isNotBlank() },
             installationId = provider.optString("installationId", "intercom-android"),
         )
     }
 
     private fun JSONObject?.toStreamProviderConfig(): StreamProviderConfig? {
         if (this == null) return null
-        val type = optString("type")
-        if (type.isBlank()) return null
+        val type = optString("type").normalizeStreamProviderType()
+        val url = optString("url").takeIf { it.isNotBlank() }
+        if (type.isBlank() || url == null) return null
         return StreamProviderConfig(
             type = type,
-            url = optString("url").takeIf { it.isNotBlank() },
-            rtspUrl = optString("rtspUrl").takeIf { it.isNotBlank() },
+            url = url,
             rtspExtras = optJSONObject("rtspExtras").toStringMap(),
             previewUrl = optString("previewUrl").takeIf { it.isNotBlank() },
             previewReloadPeriodMs = optLong("previewReloadPeriod").takeIf { has("previewReloadPeriod") && it > 0L },
             previewExtras = optJSONObject("previewExtras").toStringMap(),
-            accessControlId = optLong("accessControlId").takeIf { has("accessControlId") && it > 0L },
             cameraId = opt("cameraId")?.toString()?.takeIf { it.isNotBlank() },
         )
     }
@@ -151,7 +147,6 @@ class AppConfigLoader(
             domain = optString("domain"),
             port = optInt("port", 5060),
             transport = optString("transport").toSipTransport(),
-            accessControlId = optLong("accessControlId").takeIf { has("accessControlId") && it > 0L },
         )
     }
 
@@ -165,6 +160,13 @@ class AppConfigLoader(
             "TCP" -> SipTransport.TCP
             "TLS" -> SipTransport.TLS
             else -> SipTransport.UDP
+        }
+    }
+
+    private fun String.normalizeStreamProviderType(): String {
+        return when (lowercase()) {
+            "rtsp" -> "config"
+            else -> this
         }
     }
 

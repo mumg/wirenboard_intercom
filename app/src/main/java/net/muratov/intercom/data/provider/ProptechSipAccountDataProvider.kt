@@ -55,8 +55,6 @@ class ProptechSipAccountDataProvider(
         accessControls: List<MyHomeAccessControl>,
     ): MyHomeAccessControl? {
         return accessControls.firstOrNull { control ->
-            source.provider.accessControlId != null && control.id == source.provider.accessControlId
-        } ?: accessControls.firstOrNull { control ->
             control.name.equals(source.provider.title, ignoreCase = true)
         } ?: accessControls.firstOrNull { control ->
             control.id.toString() == source.id

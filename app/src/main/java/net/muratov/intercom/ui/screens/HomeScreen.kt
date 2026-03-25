@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,7 +57,14 @@ fun HomeScreen(
     browserVisible: Boolean,
     onStreamSelected: (RtspStream) -> Unit,
 ) {
-    BoxWithConstraints(
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val tileColumnWidth = when {
+        screenWidth > 1400.dp -> 272.dp
+        screenWidth > 1000.dp -> 240.dp
+        else -> 208.dp
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
@@ -65,12 +73,6 @@ fun HomeScreen(
                 ),
             ),
     ) {
-        val tileColumnWidth = when {
-            maxWidth > 1400.dp -> 272.dp
-            maxWidth > 1000.dp -> 240.dp
-            else -> 208.dp
-        }
-
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -306,7 +308,7 @@ private fun StreamTile(
                         )
                     }
 
-                    !stream.rtspUrl.isNullOrBlank() -> {
+                    else -> {
                         RtspPlayer(
                             url = stream.rtspUrl,
                             muted = true,

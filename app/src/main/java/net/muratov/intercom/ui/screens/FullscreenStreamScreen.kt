@@ -32,24 +32,11 @@ fun FullscreenStreamScreen(
                 ),
             ),
     ) {
-        when {
-            !stream.rtspUrl.isNullOrBlank() -> {
-                RtspPlayer(
-                    url = stream.rtspUrl,
-                    muted = false,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-
-            !stream.previewUrl.isNullOrBlank() -> {
-                ReloadingPreviewImage(
-                    url = stream.previewUrl,
-                    headers = stream.previewExtras,
-                    reloadPeriodMs = stream.previewReloadPeriodMs,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
+        RtspPlayer(
+            url = stream.rtspUrl,
+            muted = false,
+            modifier = Modifier.fillMaxSize(),
+        )
 
         if (onOpen != null && stream.openAction != null) {
             FloatingActionButton(

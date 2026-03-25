@@ -37,7 +37,6 @@ class MainApplication : Application() {
         )
         val providers: List<IntercomProvider> = listOf(
             ConfigStreamDataProvider("config"),
-            ConfigStreamDataProvider("rtsp"),
             ConfigSipAccountDataProvider(),
             ProptechStreamDataProvider(myHomeProviderService),
             ProptechSipAccountDataProvider(myHomeProviderService),
