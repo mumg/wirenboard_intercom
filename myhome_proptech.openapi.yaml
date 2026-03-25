@@ -1,0 +1,986 @@
+openapi: 3.0.3
+info:
+  title: MyHome Proptech API
+  version: "0.1.0"
+  description: >
+    Черновая OpenAPI-спецификация, восстановленная по HAR-файлу
+  contact:
+    name: Reverse engineered from HAR
+servers:
+  - url: https://myhome.proptech.ru
+    description: Production
+  - url: https://myhome.stage.proptech.ru
+    description: Stage
+tags:
+  - name: Public
+  - name: Auth
+  - name: Subscriber
+  - name: Access Control
+  - name: Camera
+  - name: Payment
+  - name: Realtime
+paths:
+  /public/v1/operators:
+    get:
+      tags: [Public]
+      summary: Get operators
+      description: Возвращает список операторов/регионов и их auth/info endpoints.
+      operationId: getOperators
+      responses:
+        "200":
+          description: Operators list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorsResponse"
+              examples:
+                sample:
+                  value:
+                    data:
+                      - id: 22
+                        dispName: Нижний Новгород
+                        authUrl: https://nn.db.ertelecom.ru/cgi-bin/ppo/es_webface/open_auth.authorize_password
+                        infoUrl: https://domru.ru
+                        mobileFeatures:
+                          - ALLOW_NEW_ADDRESS
+
+  /auth/v2/login/{phone}:
+    get:
+      tags: [Auth]
+      summary: Find login contexts by phone
+      description: >
+        По номеру телефона возвращает возможные контексты авторизации
+        (`operatorId`, `accountId`, `placeId`, `profileId`).
+      operationId: getLoginContextsByPhone
+      parameters:
+        - $ref: "#/components/parameters/PhonePath"
+      responses:
+        "200":
+          description: Login contexts found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginContextList"
+        "300":
+          description: Multiple or selectable login contexts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginContextList"
+
+  /auth/v2/confirmation/{phone}:
+    post:
+      tags: [Auth]
+      summary: Start phone confirmation
+      description: Инициирует процедуру подтверждения для выбранного аккаунта/места.
+      operationId: startPhoneConfirmation
+      parameters:
+        - $ref: "#/components/parameters/PhonePath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmationStartRequest"
+      responses:
+        "200":
+          description: Confirmation flow started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyObject"
+
+  /auth/v3/auth/{phone}/confirmation:
+    post:
+      tags: [Auth]
+      summary: Confirm auth and issue tokens
+      description: >
+        Финальный шаг аутентификации. Проверяет код/ключевую фразу и возвращает
+        bearer-токены.
+      operationId: confirmAuthByPhone
+      parameters:
+        - $ref: "#/components/parameters/PhonePath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthConfirmationRequest"
+      responses:
+        "200":
+          description: Auth success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokensResponse"
+        "400":
+          description: Invalid confirmation code or phrase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rest/v1/subscriberNotifications:
+    post:
+      tags: [Subscriber]
+      summary: Register push notifications
+      description: Регистрирует мобильную установку и push-токен на backend.
+      operationId: registerSubscriberNotifications
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubscriberNotificationRegistrationRequest"
+      responses:
+        "200":
+          description: Registration accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyObject"
+
+  /rest/v3/subscriber-places:
+    get:
+      tags: [Subscriber]
+      summary: Get subscriber places
+      description: >
+        Возвращает доступные пользователю места и provider-контекст.
+        При передаче `placeId` фильтрует ответ по конкретному месту.
+      operationId: getSubscriberPlaces
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: placeId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Places list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriberPlacesResponse"
+
+  /rest/v1/subscribers/profiles:
+    get:
+      tags: [Subscriber]
+      summary: Get subscriber profile
+      operationId: getSubscriberProfile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Profile loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriberProfileResponse"
+
+  /rest/v1/places/{placeId}/accesscontrols:
+    get:
+      tags: [Access Control]
+      summary: Get access controls for place
+      description: Возвращает домофоны/точки доступа для места.
+      operationId: getPlaceAccessControls
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PlaceIdPath"
+      responses:
+        "200":
+          description: Access controls
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessControlsResponse"
+
+  /rest/v1/places/{placeId}/accesscontrols/{accessControlId}/videosnapshots:
+    get:
+      tags: [Access Control]
+      summary: Get access control snapshot
+      description: Возвращает JPEG-снимок/превью для домофонной точки доступа.
+      operationId: getAccessControlVideoSnapshot
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PlaceIdPath"
+        - $ref: "#/components/parameters/AccessControlIdPath"
+      responses:
+        "200":
+          description: Snapshot image
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+
+  /rest/v1/places/{placeId}/accesscontrols/{accessControlId}/actions:
+    post:
+      tags: [Access Control]
+      summary: Execute access control action
+      description: >
+        Выполняет действие над домофонной точкой доступа. В HAR от 2026-03-25
+        подтверждено значение `"accessControlOpen"` для открытия двери.
+      operationId: executeAccessControlAction
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PlaceIdPath"
+        - $ref: "#/components/parameters/AccessControlIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccessControlActionRequest"
+            examples:
+              open:
+                value: accessControlOpen
+      responses:
+        "200":
+          description: Action execution result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessControlActionResponse"
+
+  /rest/v1/places/{placeId}/accesscontrols/{accessControlId}/sipdevices:
+    post:
+      tags: [Access Control]
+      summary: Register SIP device
+      description: >
+        Регистрирует SIP-устройство приложения и возвращает SIP-учетные данные
+        для конкретного access control.
+      operationId: registerSipDevice
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PlaceIdPath"
+        - $ref: "#/components/parameters/AccessControlIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SipDeviceRegistrationRequest"
+      responses:
+        "200":
+          description: SIP device registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SipDeviceResponse"
+
+  /rest/v1/places/{placeId}/cameras:
+    get:
+      tags: [Camera]
+      summary: Get private cameras for place
+      operationId: getPlaceCameras
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PlaceIdPath"
+      responses:
+        "200":
+          description: Cameras list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericDataArrayResponse"
+
+  /rest/v2/places/{placeId}/public/cameras:
+    get:
+      tags: [Camera]
+      summary: Get public cameras for place
+      operationId: getPlacePublicCameras
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PlaceIdPath"
+      responses:
+        "200":
+          description: Public cameras list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericDataArrayResponse"
+
+  /rest/v1/stomp/available-features:
+    get:
+      tags: [Realtime]
+      summary: Get available STOMP features
+      operationId: getAvailableStompFeatures
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Realtime features
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NullableDataResponse"
+
+  /api/mh-payment/mobile/v1/finance:
+    get:
+      tags: [Payment]
+      summary: Get place finance status
+      operationId: getPlaceFinance
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: placeId
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Finance info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PhonePath:
+      name: phone
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Phone number in the format expected by the API.
+    PlaceIdPath:
+      name: placeId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    AccessControlIdPath:
+      name: accessControlId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+  schemas:
+    EmptyObject:
+      type: object
+      additionalProperties: true
+      description: Empty or unspecified response body.
+
+    ErrorResponse:
+      type: object
+      properties:
+        errorCode:
+          type: string
+        errorMessage:
+          type: string
+      required:
+        - errorCode
+        - errorMessage
+      additionalProperties: true
+
+    OperatorsResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Operator"
+      required:
+        - data
+
+    Operator:
+      type: object
+      properties:
+        id:
+          type: integer
+        dispName:
+          type: string
+        location:
+          oneOf:
+            - $ref: "#/components/schemas/OperatorLocation"
+            - type: "null"
+        authUrl:
+          type: string
+          format: uri
+        infoUrl:
+          type: string
+          format: uri
+        mobileFeatures:
+          type: array
+          items:
+            type: string
+      required:
+        - id
+        - dispName
+        - authUrl
+        - infoUrl
+        - mobileFeatures
+      additionalProperties: true
+
+    OperatorLocation:
+      type: object
+      properties:
+        coordinates:
+          type: object
+          properties:
+            minPoint:
+              $ref: "#/components/schemas/GeoPoint"
+            maxPoint:
+              $ref: "#/components/schemas/GeoPoint"
+          additionalProperties: true
+        accountIdPrefix:
+          type: string
+        accountIdPrefixes:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    GeoPoint:
+      type: object
+      properties:
+        longitude:
+          type: number
+        latitude:
+          type: number
+      additionalProperties: true
+
+    LoginContextList:
+      type: array
+      items:
+        $ref: "#/components/schemas/LoginContext"
+
+    LoginContext:
+      type: object
+      properties:
+        operatorId:
+          type: integer
+        subscriberId:
+          type: integer
+        accountId:
+          type: string
+        placeId:
+          type: integer
+        address:
+          type: string
+        profileId:
+          type: string
+      required:
+        - operatorId
+        - subscriberId
+        - accountId
+        - placeId
+        - address
+        - profileId
+      additionalProperties: true
+
+    ConfirmationStartRequest:
+      type: object
+      properties:
+        operatorId:
+          type: integer
+        accountId:
+          type: string
+        address:
+          type: string
+        profileId:
+          type: string
+        subscriberId:
+          oneOf:
+            - type: integer
+            - type: string
+        placeId:
+          type: integer
+      required:
+        - operatorId
+        - accountId
+        - address
+        - profileId
+        - subscriberId
+        - placeId
+      additionalProperties: false
+
+    AuthConfirmationRequest:
+      type: object
+      properties:
+        operatorId:
+          type: integer
+        login:
+          type: string
+        accountId:
+          type: string
+        profileId:
+          type: string
+        confirm1:
+          type: string
+        confirm2:
+          type: string
+        subscriberId:
+          oneOf:
+            - type: integer
+            - type: string
+      required:
+        - operatorId
+        - login
+        - accountId
+        - profileId
+        - confirm1
+        - confirm2
+        - subscriberId
+      additionalProperties: false
+
+    AuthTokensResponse:
+      type: object
+      properties:
+        operatorId:
+          type: integer
+        operatorName:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        accessToken:
+          type: string
+        expiresIn:
+          oneOf:
+            - type: integer
+            - type: "null"
+        refreshToken:
+          type: string
+        refreshExpiresIn:
+          oneOf:
+            - type: integer
+            - type: "null"
+      required:
+        - operatorId
+        - operatorName
+        - tokenType
+        - accessToken
+        - refreshToken
+      additionalProperties: true
+
+    SubscriberNotificationRegistrationRequest:
+      type: object
+      properties:
+        appVersionCode:
+          type: integer
+        installationId:
+          type: string
+        appId:
+          type: integer
+        appVersion:
+          type: string
+        platform:
+          type: string
+        pushToken:
+          type: string
+        isDevelop:
+          type: boolean
+        deviceManufacturer:
+          type: string
+        deviceModelName:
+          type: string
+        osVersion:
+          type: string
+        deviceId:
+          type: string
+      required:
+        - appVersionCode
+        - installationId
+        - appId
+        - appVersion
+        - platform
+        - pushToken
+        - isDevelop
+        - deviceManufacturer
+        - deviceModelName
+        - osVersion
+        - deviceId
+      additionalProperties: false
+
+    SubscriberPlacesResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubscriberPlace"
+      required:
+        - data
+
+    SubscriberPlace:
+      type: object
+      properties:
+        id:
+          type: integer
+        subscriberType:
+          type: string
+        subscriberState:
+          type: string
+        place:
+          $ref: "#/components/schemas/Place"
+        subscriber:
+          $ref: "#/components/schemas/Subscriber"
+        guardCallOut:
+          $ref: "#/components/schemas/GuardCallOut"
+        payment:
+          $ref: "#/components/schemas/PaymentFlags"
+        provider:
+          type: string
+        blocked:
+          type: boolean
+      required:
+        - id
+        - subscriberType
+        - subscriberState
+        - place
+        - subscriber
+        - provider
+        - blocked
+      additionalProperties: true
+
+    Place:
+      type: object
+      properties:
+        id:
+          type: integer
+        address:
+          $ref: "#/components/schemas/PlaceAddress"
+        location:
+          $ref: "#/components/schemas/GeoPoint"
+        operatorId:
+          type: integer
+        autoArmingState:
+          type: boolean
+        autoArmingRadius:
+          type: integer
+      required:
+        - id
+        - address
+        - operatorId
+      additionalProperties: true
+
+    PlaceAddress:
+      type: object
+      properties:
+        index:
+          oneOf:
+            - type: string
+            - type: "null"
+        region:
+          type: string
+        district:
+          oneOf:
+            - type: string
+            - type: "null"
+        city:
+          type: string
+        locality:
+          oneOf:
+            - type: string
+            - type: "null"
+        street:
+          type: string
+        house:
+          type: string
+        building:
+          oneOf:
+            - type: string
+            - type: "null"
+        apartment:
+          type: string
+        visibleAddress:
+          type: string
+        groupName:
+          type: string
+      additionalProperties: true
+
+    Subscriber:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        accountId:
+          oneOf:
+            - type: string
+            - type: "null"
+        nickName:
+          oneOf:
+            - type: string
+            - type: "null"
+      required:
+        - id
+        - name
+      additionalProperties: true
+
+    GuardCallOut:
+      type: object
+      properties:
+        active:
+          type: boolean
+        phoneNumber:
+          type: string
+      additionalProperties: true
+
+    PaymentFlags:
+      type: object
+      properties:
+        useLink:
+          type: boolean
+      additionalProperties: true
+
+    SubscriberProfileResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/SubscriberProfileData"
+      required:
+        - data
+
+    SubscriberProfileData:
+      type: object
+      properties:
+        subscriber:
+          $ref: "#/components/schemas/Subscriber"
+        pushUserId:
+          type: string
+        subscriberPhones:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubscriberPhone"
+        allowAddPhone:
+          type: boolean
+      required:
+        - subscriber
+      additionalProperties: true
+
+    SubscriberPhone:
+      type: object
+      properties:
+        id:
+          type: integer
+        number:
+          type: string
+        numberValid:
+          type: boolean
+      additionalProperties: true
+
+    AccessControlsResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccessControl"
+      required:
+        - data
+
+    AccessControl:
+      type: object
+      properties:
+        id:
+          type: integer
+        operatorId:
+          type: integer
+        name:
+          type: string
+        forpostGroupId:
+          type: string
+        forpostAccountId:
+          oneOf:
+            - type: string
+            - type: "null"
+        type:
+          type: string
+        allowOpen:
+          type: boolean
+        openMethod:
+          type: string
+        allowVideo:
+          type: boolean
+        allowCallMobile:
+          type: boolean
+        allowSlideshow:
+          type: boolean
+        previewAvailable:
+          type: boolean
+        timeZone:
+          type: integer
+        quota:
+          type: integer
+        externalCameraId:
+          oneOf:
+            - type: string
+            - type: integer
+        externalDeviceId:
+          oneOf:
+            - type: string
+            - type: integer
+            - type: "null"
+        entrances:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - id
+        - operatorId
+        - name
+        - type
+        - allowOpen
+      additionalProperties: true
+
+    AccessControlActionRequest:
+      type: string
+      description: >
+        Action command encoded as a JSON string. Confirmed value in HAR:
+        `accessControlOpen`.
+      example: accessControlOpen
+
+    AccessControlActionResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/AccessControlActionResult"
+      required:
+        - data
+
+    AccessControlActionResult:
+      type: object
+      properties:
+        status:
+          type: boolean
+        errorCode:
+          oneOf:
+            - type: string
+            - type: "null"
+        errorMessage:
+          oneOf:
+            - type: string
+            - type: "null"
+      required:
+        - status
+        - errorCode
+        - errorMessage
+      additionalProperties: true
+
+    SipDeviceRegistrationRequest:
+      type: object
+      properties:
+        installationId:
+          type: string
+      required:
+        - installationId
+      additionalProperties: false
+
+    SipDeviceResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/SipDevice"
+      required:
+        - data
+
+    SipDevice:
+      type: object
+      properties:
+        id:
+          type: string
+        realm:
+          type: string
+        login:
+          type: string
+        password:
+          type: string
+      required:
+        - id
+        - realm
+        - login
+        - password
+      additionalProperties: true
+
+    GenericDataArrayResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - data
+
+    NullableDataResponse:
+      type: object
+      properties:
+        data:
+          nullable: true
+      required:
+        - data
+      additionalProperties: true
+
+    FinanceResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/FinanceData"
+      required:
+        - data
+
+    FinanceData:
+      type: object
+      properties:
+        balance:
+          oneOf:
+            - type: number
+            - type: "null"
+        blockType:
+          type: string
+        amountSum:
+          oneOf:
+            - type: number
+            - type: "null"
+        targetDate:
+          oneOf:
+            - type: string
+            - type: "null"
+        paymentLink:
+          oneOf:
+            - type: string
+            - type: "null"
+        daysToBlock:
+          oneOf:
+            - type: integer
+            - type: "null"
+        daysToWarning:
+          oneOf:
+            - type: integer
+            - type: "null"
+        company:
+          nullable: true
+        blocked:
+          type: boolean
+      required:
+        - blockType
+        - blocked
+      additionalProperties: true

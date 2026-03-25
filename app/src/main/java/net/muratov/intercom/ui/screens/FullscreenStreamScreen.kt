@@ -23,10 +23,23 @@ fun FullscreenStreamScreen(
                 ),
             ),
     ) {
-        RtspPlayer(
-            url = stream.url,
-            muted = false,
-            modifier = Modifier.fillMaxSize(),
-        )
+        when {
+            !stream.rtspUrl.isNullOrBlank() -> {
+                RtspPlayer(
+                    url = stream.rtspUrl,
+                    muted = false,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            !stream.previewUrl.isNullOrBlank() -> {
+                ReloadingPreviewImage(
+                    url = stream.previewUrl,
+                    headers = stream.previewExtras,
+                    reloadPeriodMs = stream.previewReloadPeriodMs,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
     }
 }

@@ -47,6 +47,7 @@ import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.video.RtspPlayer
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.WebRequestError
 
 @Composable
 fun HomeScreen(
@@ -129,10 +130,17 @@ private fun GeckoPane(
 }
 
 private class GeckoBrowserView(context: Context) : FrameLayout(context) {
+    companion object {
+        private const val RETRY_DELAY_MS = 15_000L
+    }
+
     private val geckoView = GeckoView(context)
     private val geckoSession = GeckoSession()
+    private val retryLoadRunnable = Runnable { retryLoadIfNeeded() }
     private var currentUrl: String? = null
     private var opened = false
+    private var pageLoadedSuccessfully = false
+    private var browserVisible = true
 
     init {
         layoutParams = LayoutParams(
@@ -147,6 +155,30 @@ private class GeckoBrowserView(context: Context) : FrameLayout(context) {
         geckoView.setBackgroundColor(AndroidColor.WHITE)
         addView(geckoView)
 
+        geckoSession.setNavigationDelegate(
+            object : GeckoSession.NavigationDelegate {
+                override fun onLoadError(
+                    session: GeckoSession,
+                    uri: String?,
+                    error: WebRequestError,
+                ) = null.also {
+                    pageLoadedSuccessfully = false
+                    scheduleRetry()
+                }
+            },
+        )
+        geckoSession.setProgressDelegate(
+            object : GeckoSession.ProgressDelegate {
+                override fun onPageStop(session: GeckoSession, success: Boolean) {
+                    pageLoadedSuccessfully = success
+                    if (success) {
+                        cancelRetry()
+                    } else {
+                        scheduleRetry()
+                    }
+                }
+            },
+        )
         geckoSession.open(GeckoRuntimeHolder.getOrCreate(context))
         geckoView.setSession(geckoSession)
         opened = true
@@ -156,21 +188,54 @@ private class GeckoBrowserView(context: Context) : FrameLayout(context) {
         val targetUrl = url.toBrowserUrl()
         if (currentUrl == targetUrl) return
         currentUrl = targetUrl
+        pageLoadedSuccessfully = targetUrl == "about:blank"
+        cancelRetry()
         geckoSession.loadUri(targetUrl)
+        if (!pageLoadedSuccessfully) {
+            scheduleRetry()
+        }
     }
 
     fun setBrowserVisible(visible: Boolean) {
+        browserVisible = visible
         val visibility = if (visible) View.VISIBLE else View.INVISIBLE
         this.visibility = visibility
         geckoView.visibility = visibility
+        if (visible && !pageLoadedSuccessfully && !currentUrl.isNullOrBlank()) {
+            scheduleRetry()
+        } else if (!visible) {
+            cancelRetry()
+        }
     }
 
     override fun onDetachedFromWindow() {
+        cancelRetry()
         if (opened && geckoSession.isOpen) {
             geckoSession.close()
             opened = false
         }
         super.onDetachedFromWindow()
+    }
+
+    private fun retryLoadIfNeeded() {
+        val targetUrl = currentUrl
+        if (!opened || !browserVisible || pageLoadedSuccessfully || targetUrl.isNullOrBlank() || targetUrl == "about:blank") {
+            return
+        }
+        geckoSession.loadUri(targetUrl)
+        scheduleRetry()
+    }
+
+    private fun scheduleRetry() {
+        if (!browserVisible || pageLoadedSuccessfully || currentUrl.isNullOrBlank() || currentUrl == "about:blank") {
+            return
+        }
+        removeCallbacks(retryLoadRunnable)
+        postDelayed(retryLoadRunnable, RETRY_DELAY_MS)
+    }
+
+    private fun cancelRetry() {
+        removeCallbacks(retryLoadRunnable)
     }
 }
 
@@ -231,11 +296,24 @@ private fun StreamTile(
                     .height(tileHeight)
                     .clip(RoundedCornerShape(18.dp)),
             ) {
-                RtspPlayer(
-                    url = stream.url,
-                    muted = true,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                when {
+                    !stream.previewUrl.isNullOrBlank() -> {
+                        ReloadingPreviewImage(
+                            url = stream.previewUrl,
+                            headers = stream.previewExtras,
+                            reloadPeriodMs = stream.previewReloadPeriodMs,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+
+                    !stream.rtspUrl.isNullOrBlank() -> {
+                        RtspPlayer(
+                            url = stream.rtspUrl,
+                            muted = true,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)

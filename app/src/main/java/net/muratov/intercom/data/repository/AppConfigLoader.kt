@@ -2,9 +2,12 @@ package net.muratov.intercom.data.repository
 
 import android.content.Context
 import net.muratov.intercom.data.model.AppConfig
-import net.muratov.intercom.data.model.RtspStream
-import net.muratov.intercom.data.model.SipAccountConfig
+import net.muratov.intercom.data.model.SipAccountProviderConfig
+import net.muratov.intercom.data.model.SipAccountSourceConfig
 import net.muratov.intercom.data.model.SipTransport
+import net.muratov.intercom.data.model.StreamProviderConfig
+import net.muratov.intercom.data.model.StreamSourceConfig
+import net.muratov.intercom.provider.myhome.MyHomeProptechConfig
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -21,12 +24,13 @@ class AppConfigLoader(
     private fun parseConfig(root: JSONObject): AppConfig {
         return AppConfig(
             webViewUrl = root.optString("webViewUrl", "about:blank"),
-            streams = root.optJSONArray("streams").toRtspStreams(),
-            sipAccounts = root.optJSONArray("sipAccounts").toSipAccounts(),
+            streams = root.optJSONArray("streams").toStreamSources(),
+            sipAccounts = root.optJSONArray("sipAccounts").toSipAccountSources(),
+            myHomeProptech = root.optJSONArray("providers").toMyHomeProptechConfig(),
         )
     }
 
-    private fun JSONArray?.toRtspStreams(): List<RtspStream> {
+    private fun JSONArray?.toStreamSources(): List<StreamSourceConfig> {
         if (this == null) return emptyList()
         return List(length()) { index ->
             optJSONObject(index)
@@ -34,39 +38,27 @@ class AppConfigLoader(
             item ?: return@mapNotNull null
             val id = item.optString("id")
             val title = item.optString("title")
-            val url = item.optString("url")
-            if (id.isBlank() || title.isBlank() || url.isBlank()) {
+            val provider = item.optJSONObject("provider").toStreamProviderConfig()
+            if (id.isBlank() || title.isBlank() || provider == null) {
                 null
             } else {
-                RtspStream(id = id, title = title, url = url)
+                StreamSourceConfig(id = id, title = title, provider = provider)
             }
         }
     }
 
-    private fun JSONArray?.toSipAccounts(): List<SipAccountConfig> {
+    private fun JSONArray?.toSipAccountSources(): List<SipAccountSourceConfig> {
         if (this == null) return emptyList()
         return List(length()) { index ->
             optJSONObject(index)
         }.mapNotNull { item ->
             item ?: return@mapNotNull null
             val id = item.optString("id")
-            val title = item.optString("title")
-            val username = item.optString("username")
-            val password = item.optString("password")
-            val domain = item.optString("domain")
-            if (id.isBlank() || title.isBlank() || username.isBlank() || password.isBlank() || domain.isBlank()) {
+            val provider = item.optJSONObject("provider").toSipAccountProviderConfig()
+            if (id.isBlank() || provider == null) {
                 null
             } else {
-                SipAccountConfig(
-                    id = id,
-                    title = title,
-                    username = username,
-                    password = password,
-                    domain = domain,
-                    port = item.optInt("port", 5060),
-                    transport = item.optString("transport").toSipTransport(),
-                    displayName = item.optString("displayName", title),
-                )
+                SipAccountSourceConfig(id = id, provider = provider)
             }
         }
     }
@@ -75,30 +67,97 @@ class AppConfigLoader(
         return AppConfig(
             webViewUrl = "about:blank",
             streams = listOf(
-                RtspStream("cam-1", "Entrance", "rtsp://192.168.1.10:554/stream1"),
-                RtspStream("cam-2", "Warehouse", "rtsp://192.168.1.11:554/stream1"),
-                RtspStream("cam-3", "Reception", "rtsp://192.168.1.12:554/stream1"),
-                RtspStream("cam-4", "Parking", "rtsp://192.168.1.13:554/stream1"),
+                StreamSourceConfig(
+                    id = "cam-1",
+                    title = "Entrance",
+                    provider = StreamProviderConfig(type = "rtsp", url = "rtsp://192.168.1.10:554/stream1"),
+                ),
+                StreamSourceConfig(
+                    id = "cam-2",
+                    title = "Warehouse",
+                    provider = StreamProviderConfig(type = "rtsp", url = "rtsp://192.168.1.11:554/stream1"),
+                ),
             ),
             sipAccounts = listOf(
-                SipAccountConfig(
+                SipAccountSourceConfig(
                     id = "main-office",
-                    title = "Main Office",
-                    username = "1001",
-                    password = "change-me",
-                    domain = "sip.office.local",
-                    port = 5061,
-                    transport = SipTransport.TLS,
+                    provider = SipAccountProviderConfig(
+                        type = "config",
+                        title = "Main Office",
+                        username = "1001",
+                        password = "change-me",
+                        domain = "sip.office.local",
+                        port = 5061,
+                        transport = SipTransport.TLS,
+                    ),
                 ),
-                SipAccountConfig(
+                SipAccountSourceConfig(
                     id = "warehouse",
-                    title = "Warehouse PBX",
-                    username = "2001",
-                    password = "change-me",
-                    domain = "sip.warehouse.local",
+                    provider = SipAccountProviderConfig(
+                        type = "config",
+                        title = "Warehouse PBX",
+                        username = "2001",
+                        password = "change-me",
+                        domain = "sip.warehouse.local",
+                    ),
                 ),
             ),
+            myHomeProptech = MyHomeProptechConfig(),
         )
+    }
+
+    private fun JSONArray?.toMyHomeProptechConfig(): MyHomeProptechConfig {
+        val provider = List(this?.length() ?: 0) { index -> this?.optJSONObject(index) }
+            .firstOrNull { item -> item?.optString("type") == "proptech" }
+            ?: return MyHomeProptechConfig()
+        return MyHomeProptechConfig(
+            enabled = true,
+            baseUrl = provider.optString("baseUrl", "https://myhome.proptech.ru"),
+            phone = provider.optString("phone"),
+            preferredPlaceId = provider.optLong("preferredPlaceId").takeIf { provider.has("preferredPlaceId") && it > 0L },
+            preferredProfileId = provider.optString("preferredProfileId").takeIf { it.isNotBlank() },
+            confirmationSecret = provider.optString("confirmationSecret").takeIf { it.isNotBlank() },
+            installationId = provider.optString("installationId", "intercom-android"),
+        )
+    }
+
+    private fun JSONObject?.toStreamProviderConfig(): StreamProviderConfig? {
+        if (this == null) return null
+        val type = optString("type")
+        if (type.isBlank()) return null
+        return StreamProviderConfig(
+            type = type,
+            url = optString("url").takeIf { it.isNotBlank() },
+            rtspUrl = optString("rtspUrl").takeIf { it.isNotBlank() },
+            rtspExtras = optJSONObject("rtspExtras").toStringMap(),
+            previewUrl = optString("previewUrl").takeIf { it.isNotBlank() },
+            previewReloadPeriodMs = optLong("previewReloadPeriod").takeIf { has("previewReloadPeriod") && it > 0L },
+            previewExtras = optJSONObject("previewExtras").toStringMap(),
+            accessControlId = optLong("accessControlId").takeIf { has("accessControlId") && it > 0L },
+            cameraId = opt("cameraId")?.toString()?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun JSONObject?.toSipAccountProviderConfig(): SipAccountProviderConfig? {
+        if (this == null) return null
+        val type = optString("type")
+        if (type.isBlank()) return null
+        return SipAccountProviderConfig(
+            type = type,
+            title = optString("title"),
+            displayName = optString("displayName"),
+            username = optString("username"),
+            password = optString("password"),
+            domain = optString("domain"),
+            port = optInt("port", 5060),
+            transport = optString("transport").toSipTransport(),
+            accessControlId = optLong("accessControlId").takeIf { has("accessControlId") && it > 0L },
+        )
+    }
+
+    private fun JSONObject?.toStringMap(): Map<String, String> {
+        if (this == null) return emptyMap()
+        return keys().asSequence().associateWith { key -> opt(key)?.toString().orEmpty() }
     }
 
     private fun String.toSipTransport(): SipTransport {

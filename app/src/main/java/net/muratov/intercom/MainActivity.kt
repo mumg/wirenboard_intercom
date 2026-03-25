@@ -32,6 +32,9 @@ import net.muratov.intercom.ui.navigation.IntercomNavGraph
 import net.muratov.intercom.ui.screens.ActiveCallOverlay
 import net.muratov.intercom.ui.screens.FullscreenStreamScreen
 import net.muratov.intercom.ui.screens.IncomingCallOverlay
+import net.muratov.intercom.ui.screens.MyHomeContextSelectionDialog
+import net.muratov.intercom.ui.screens.MyHomeVerificationDialog
+import net.muratov.intercom.ui.screens.ProptechRegistrationWizardScreen
 import net.muratov.intercom.ui.theme.IntercomTheme
 import net.muratov.intercom.ui.viewmodel.MainViewModel
 import net.muratov.intercom.ui.viewmodel.MainViewModelFactory
@@ -74,6 +77,7 @@ private fun IntercomApp(
     val activity = LocalContext.current.findActivity()
     var selectedStreamId by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedStream = uiState.streams.firstOrNull { it.id == selectedStreamId }
+    val showWizard = uiState.proptechWizardRequired && !uiState.canEnterMainUi
 
     DisposableEffect(activity, view) {
         val window = activity?.window
@@ -87,44 +91,80 @@ private fun IntercomApp(
         }
     }
 
-    LaunchedEffect(appContainer) {
-        appContainer.startIfNeeded()
+    LaunchedEffect(uiState.proptechWizardRequired) {
+        if (uiState.proptechWizardRequired) {
+            viewModel.startRegistrationIfNeeded()
+        } else {
+            viewModel.startMainIfNeeded()
+        }
+    }
+
+    LaunchedEffect(uiState.canEnterMainUi) {
+        if (uiState.canEnterMainUi) {
+            viewModel.startMainIfNeeded()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        IntercomNavGraph(
-            navController = navController,
-            webViewUrl = appContainer.webViewUrl,
-            streams = uiState.streams,
-            browserVisible = selectedStream == null,
-            onStreamSelected = { stream -> selectedStreamId = stream.id },
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        if (selectedStream != null) {
-            FullscreenStreamOverlay(
-                stream = selectedStream,
-                onDismiss = { selectedStreamId = null },
+        if (showWizard) {
+            ProptechRegistrationWizardScreen(
+                providerState = uiState.myHomeProviderState,
+                onStart = viewModel::restartRegistration,
+                onRetry = viewModel::restartRegistration,
             )
-        }
-
-        uiState.incomingCall?.let { call ->
-            IncomingCallOverlay(
-                callSession = call,
-                sipService = appContainer.sipService,
-                onAccept = viewModel::answerIncomingCall,
-                onReject = viewModel::rejectIncomingCall,
+        } else {
+            IntercomNavGraph(
+                navController = navController,
+                webViewUrl = appContainer.webViewUrl,
+                streams = uiState.streams,
+                browserVisible = selectedStream == null,
+                onStreamSelected = { stream -> selectedStreamId = stream.id },
+                modifier = Modifier.fillMaxSize(),
             )
-        }
 
-        if (uiState.incomingCall == null) {
-            uiState.activeCall?.let { call ->
-                ActiveCallOverlay(
-                    callSession = call,
-                    sipService = appContainer.sipService,
-                    onHangup = viewModel::endActiveCall,
+            if (selectedStream != null) {
+                FullscreenStreamOverlay(
+                    stream = selectedStream,
+                    onDismiss = { selectedStreamId = null },
                 )
             }
+
+            uiState.incomingCall?.let { call ->
+                IncomingCallOverlay(
+                    callSession = call,
+                    sipService = appContainer.sipService,
+                    onAccept = viewModel::answerIncomingCall,
+                    onReject = viewModel::rejectIncomingCall,
+                )
+            }
+
+            if (uiState.incomingCall == null) {
+                uiState.activeCall?.let { call ->
+                    ActiveCallOverlay(
+                        callSession = call,
+                        sipService = appContainer.sipService,
+                        onHangup = viewModel::endActiveCall,
+                    )
+                }
+            }
+        }
+
+        uiState.contextSelectionPrompt?.let { prompt ->
+            MyHomeContextSelectionDialog(
+                prompt = prompt,
+                message = uiState.myHomeProviderState.message,
+                onDismiss = viewModel::dismissVerificationPrompt,
+                onConfirm = viewModel::selectLoginContext,
+            )
+        }
+
+        uiState.verificationPrompt?.let { prompt ->
+            MyHomeVerificationDialog(
+                prompt = prompt,
+                message = uiState.myHomeProviderState.message,
+                onDismiss = viewModel::dismissVerificationPrompt,
+                onSubmit = viewModel::submitVerificationCode,
+            )
         }
     }
 }

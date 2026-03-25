@@ -11,12 +11,22 @@ import net.muratov.intercom.AppContainer
 import net.muratov.intercom.data.model.CallSession
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.data.model.SipAccountState
+import net.muratov.intercom.provider.myhome.MyHomeAuthStatus
+import net.muratov.intercom.provider.myhome.MyHomeContextSelectionPrompt
+import net.muratov.intercom.provider.myhome.MyHomeLoginContext
+import net.muratov.intercom.provider.myhome.MyHomeProviderState
+import net.muratov.intercom.provider.myhome.MyHomeVerificationPrompt
 
 data class MainUiState(
     val streams: List<RtspStream> = emptyList(),
     val sipAccounts: List<SipAccountState> = emptyList(),
     val incomingCall: CallSession? = null,
     val activeCall: CallSession? = null,
+    val myHomeProviderState: MyHomeProviderState = MyHomeProviderState(),
+    val contextSelectionPrompt: MyHomeContextSelectionPrompt? = null,
+    val verificationPrompt: MyHomeVerificationPrompt? = null,
+    val proptechWizardRequired: Boolean = false,
+    val canEnterMainUi: Boolean = true,
 )
 
 class MainViewModel(
@@ -28,12 +38,18 @@ class MainViewModel(
         container.sipService.accountStates,
         container.sipService.incomingCall,
         container.sipService.activeCall,
-    ) { streams, accounts, incomingCall, activeCall ->
+        container.myHomeProviderService.state,
+    ) { streams, accounts, incomingCall, activeCall, providerState ->
         MainUiState(
             streams = streams,
             sipAccounts = accounts,
             incomingCall = incomingCall,
             activeCall = activeCall,
+            myHomeProviderState = providerState,
+            contextSelectionPrompt = providerState.contextSelectionPrompt,
+            verificationPrompt = providerState.verificationPrompt,
+            proptechWizardRequired = container.proptechWizardRequired,
+            canEnterMainUi = !container.proptechWizardRequired || providerState.status == MyHomeAuthStatus.Authorized,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -51,6 +67,30 @@ class MainViewModel(
 
     fun endActiveCall() {
         container.sipService.endCurrentCall()
+    }
+
+    fun submitVerificationCode(code: String) {
+        container.myHomeProviderService.submitVerificationCode(code)
+    }
+
+    fun selectLoginContext(context: MyHomeLoginContext) {
+        container.myHomeProviderService.selectLoginContext(context)
+    }
+
+    fun dismissVerificationPrompt() {
+        container.myHomeProviderService.dismissVerificationPrompt()
+    }
+
+    fun startRegistrationIfNeeded() {
+        container.startRegistrationIfNeeded()
+    }
+
+    fun restartRegistration() {
+        container.restartRegistration()
+    }
+
+    fun startMainIfNeeded() {
+        container.startMainIfNeeded()
     }
 }
 
