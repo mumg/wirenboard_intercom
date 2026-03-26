@@ -12,9 +12,11 @@ import net.muratov.intercom.data.provider.ConfigStreamDataProvider
 import net.muratov.intercom.data.provider.IntercomProvider
 import net.muratov.intercom.data.provider.ProptechSipAccountDataProvider
 import net.muratov.intercom.data.provider.ProptechStreamDataProvider
+import net.muratov.intercom.data.repository.AppConfigLoadResult
 import net.muratov.intercom.data.repository.AppConfigLoader
 import net.muratov.intercom.data.repository.SipAccountRepository
 import net.muratov.intercom.data.repository.StreamRepository
+import net.muratov.intercom.data.model.AppConfig
 import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.provider.myhome.MyHomeProptechService
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
@@ -28,9 +30,20 @@ class MainApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        val config = AppConfigLoader(this).load()
-        val hasProptechConsumers = config.streams.any { it.provider.type == "proptech" } ||
-            config.sipAccounts.any { it.provider.type == "proptech" }
+        AppCrashRestarter.install(this)
+        val configResult = AppConfigLoader(this).load()
+        val config = (configResult as? AppConfigLoadResult.Success)?.config ?: AppConfig()
+        val isConfigValid = configResult is AppConfigLoadResult.Success
+        val configFilePath = configResult.filePath
+        val configErrorMessage = when (configResult) {
+            is AppConfigLoadResult.Success -> null
+            is AppConfigLoadResult.Missing -> "Необходима конфигурация для приложения"
+            is AppConfigLoadResult.Invalid -> "Необходима конфигурация для приложения\n${configResult.errorMessage}"
+        }
+        val hasProptechConsumers = isConfigValid && (
+            config.streams.any { it.provider.type == "proptech" } ||
+                config.sipAccounts.any { it.provider.type == "proptech" }
+            )
         val myHomeProviderService = MyHomeProptechService(
             this,
             config.myHomeProptech.copy(enabled = config.myHomeProptech.enabled && hasProptechConsumers),
@@ -42,6 +55,9 @@ class MainApplication : Application() {
             ProptechSipAccountDataProvider(myHomeProviderService),
         )
         appContainer = AppContainer(
+            isConfigValid = isConfigValid,
+            configFilePath = configFilePath,
+            configErrorMessage = configErrorMessage,
             webViewUrl = config.webViewUrl,
             streamRepository = StreamRepository(
                 sources = config.streams,
@@ -62,6 +78,9 @@ class MainApplication : Application() {
 }
 
 data class AppContainer(
+    val isConfigValid: Boolean,
+    val configFilePath: String,
+    val configErrorMessage: String? = null,
     val webViewUrl: String,
     val streamRepository: StreamRepository,
     val sipAccountRepository: SipAccountRepository,
@@ -75,6 +94,7 @@ data class AppContainer(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     fun startRegistrationIfNeeded() {
+        if (!isConfigValid) return
         if (registrationStarted.compareAndSet(false, true)) {
             runCatching {
                 myHomeProviderService.start()
@@ -86,6 +106,7 @@ data class AppContainer(
     }
 
     fun restartRegistration() {
+        if (!isConfigValid) return
         myHomeProviderService.start()
     }
 
@@ -96,6 +117,7 @@ data class AppContainer(
     }
 
     fun startMainIfNeeded() {
+        if (!isConfigValid) return
         if (mainStarted.compareAndSet(false, true)) {
             runCatching {
                 scope.launch {

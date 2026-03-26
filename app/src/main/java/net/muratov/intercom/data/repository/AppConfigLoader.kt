@@ -1,6 +1,7 @@
 package net.muratov.intercom.data.repository
 
 import android.content.Context
+import android.os.Environment
 import net.muratov.intercom.data.model.AppConfig
 import net.muratov.intercom.data.model.SipAccountProviderConfig
 import net.muratov.intercom.data.model.SipAccountSourceConfig
@@ -10,15 +11,47 @@ import net.muratov.intercom.data.model.StreamSourceConfig
 import net.muratov.intercom.provider.myhome.MyHomeProptechConfig
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+
+sealed interface AppConfigLoadResult {
+    val filePath: String
+
+    data class Success(
+        val config: AppConfig,
+        override val filePath: String,
+    ) : AppConfigLoadResult
+
+    data class Missing(
+        override val filePath: String,
+    ) : AppConfigLoadResult
+
+    data class Invalid(
+        override val filePath: String,
+        val errorMessage: String,
+    ) : AppConfigLoadResult
+}
 
 class AppConfigLoader(
     private val context: Context,
 ) {
-    fun load(fileName: String = CONFIG_FILE_NAME): AppConfig {
+    fun load(fileName: String = CONFIG_FILE_NAME): AppConfigLoadResult {
+        val configFile = resolveConfigFile(fileName)
+        if (!configFile.exists()) {
+            return AppConfigLoadResult.Missing(configFile.absolutePath)
+        }
+
         return runCatching {
-            val rawJson = context.assets.open(fileName).bufferedReader().use { it.readText() }
-            parseConfig(JSONObject(rawJson))
-        }.getOrDefault(defaultConfig())
+            val rawJson = configFile.bufferedReader().use { it.readText() }
+            AppConfigLoadResult.Success(
+                config = parseConfig(JSONObject(rawJson)),
+                filePath = configFile.absolutePath,
+            )
+        }.getOrElse { error ->
+            AppConfigLoadResult.Invalid(
+                filePath = configFile.absolutePath,
+                errorMessage = error.message ?: "Invalid configuration file",
+            )
+        }
     }
 
     private fun parseConfig(root: JSONObject): AppConfig {
@@ -61,49 +94,6 @@ class AppConfigLoader(
                 SipAccountSourceConfig(id = id, provider = provider)
             }
         }
-    }
-
-    private fun defaultConfig(): AppConfig {
-        return AppConfig(
-            webViewUrl = "about:blank",
-            streams = listOf(
-                StreamSourceConfig(
-                    id = "cam-1",
-                    title = "Entrance",
-                    provider = StreamProviderConfig(type = "config", url = "rtsp://192.168.1.10:554/stream1"),
-                ),
-                StreamSourceConfig(
-                    id = "cam-2",
-                    title = "Warehouse",
-                    provider = StreamProviderConfig(type = "config", url = "rtsp://192.168.1.11:554/stream1"),
-                ),
-            ),
-            sipAccounts = listOf(
-                SipAccountSourceConfig(
-                    id = "main-office",
-                    provider = SipAccountProviderConfig(
-                        type = "config",
-                        title = "Main Office",
-                        username = "1001",
-                        password = "change-me",
-                        domain = "sip.office.local",
-                        port = 5061,
-                        transport = SipTransport.TLS,
-                    ),
-                ),
-                SipAccountSourceConfig(
-                    id = "warehouse",
-                    provider = SipAccountProviderConfig(
-                        type = "config",
-                        title = "Warehouse PBX",
-                        username = "2001",
-                        password = "change-me",
-                        domain = "sip.warehouse.local",
-                    ),
-                ),
-            ),
-            myHomeProptech = MyHomeProptechConfig(),
-        )
     }
 
     private fun JSONArray?.toMyHomeProptechConfig(): MyHomeProptechConfig {
@@ -168,6 +158,19 @@ class AppConfigLoader(
             "rtsp" -> "config"
             else -> this
         }
+    }
+
+    private fun resolveConfigFile(fileName: String): File {
+        val externalFilesDir = context.getExternalFilesDir(null)
+        if (externalFilesDir != null) {
+            return File(externalFilesDir, fileName)
+        }
+
+        val externalStorageRoot = Environment.getExternalStorageDirectory()
+        return File(
+            externalStorageRoot,
+            "Android/data/${context.packageName}/files/$fileName",
+        )
     }
 
     companion object {

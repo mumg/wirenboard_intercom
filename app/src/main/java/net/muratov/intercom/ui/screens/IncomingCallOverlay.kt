@@ -1,10 +1,10 @@
 package net.muratov.intercom.ui.screens
 
+import android.graphics.SurfaceTexture
 import android.view.TextureView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,6 +54,36 @@ fun IncomingCallOverlay(
             factory = { context ->
                 TextureView(context).also {
                     textureViewHolder[0] = it
+                    it.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                        override fun onSurfaceTextureAvailable(
+                            surface: SurfaceTexture,
+                            width: Int,
+                            height: Int,
+                        ) {
+                            sipService.bindRemoteVideo(it)
+                        }
+
+                        override fun onSurfaceTextureSizeChanged(
+                            surface: SurfaceTexture,
+                            width: Int,
+                            height: Int,
+                        ) = Unit
+
+                        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                            sipService.unbindRemoteVideo(it)
+                            return true
+                        }
+
+                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+                    }
+                    if (it.isAvailable) {
+                        sipService.bindRemoteVideo(it)
+                    }
+                }
+            },
+            update = {
+                textureViewHolder[0] = it
+                if (it.isAvailable) {
                     sipService.bindRemoteVideo(it)
                 }
             },
@@ -66,28 +95,18 @@ fun IncomingCallOverlay(
             }
         }
 
-        Surface(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 32.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = Color.Black.copy(alpha = 0.45f),
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
+        callSession.providerTitle?.takeIf { it.isNotBlank() }?.let { providerTitle ->
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 24.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = Color.Black.copy(alpha = 0.45f),
+            ) {
                 Text(
-                    text = callSession.remoteDisplayName.ifBlank { callSession.remoteAddress },
-                    style = MaterialTheme.typography.headlineSmall,
+                    text = providerTitle,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                     color = Color.White,
-                )
-                Text(
-                    text = "Incoming ${if (callSession.hasVideo) "video" else "audio"} call",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFD2E0FF),
-                )
-                Text(
-                    text = "Remote video is shown before answer",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF9BB1D0),
                 )
             }
         }

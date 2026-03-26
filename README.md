@@ -2,7 +2,7 @@
 
 Файл конфигурации находится здесь:
 
-`app/src/main/assets/app_config.json`
+`/sdcard/Android/data/net.muratov.intercom/files/app_config.json`
 
 Приложение читает из него:
 
@@ -20,6 +20,30 @@
   "sipAccounts": [],
   "providers": []
 }
+```
+
+## Где должен лежать файл
+
+Приложение читает конфиг только из внешнего файла:
+
+`/sdcard/Android/data/net.muratov.intercom/files/app_config.json`
+
+Если файла нет или JSON невалиден:
+
+- приложение не запускает основной экран
+- SIP не стартует
+- на экране показывается сообщение `Необходима конфигурация для приложения`
+
+## Как применить конфиг
+
+1. Создайте файл `app_config.json`
+2. Скопируйте его в `/sdcard/Android/data/net.muratov.intercom/files/`
+3. Перезапустите приложение
+
+Пример через `adb`:
+
+```bash
+adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_config.json
 ```
 
 ## `webViewUrl`
@@ -361,3 +385,4 @@
 - `previewReloadPeriod` задаётся в миллисекундах.
 - `transport` для SIP пишется строкой: `UDP`, `TCP` или `TLS`.
 - Если в конфиге нет ни одного потребителя `proptech`, авторизация `proptech` не запускается.
+- Если файл конфига отсутствует или повреждён, приложение покажет экран с просьбой добавить корректный `app_config.json`.

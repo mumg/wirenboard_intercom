@@ -4,6 +4,9 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +33,7 @@ import androidx.navigation.compose.rememberNavController
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.ui.navigation.IntercomNavGraph
 import net.muratov.intercom.ui.screens.ActiveCallOverlay
+import net.muratov.intercom.ui.screens.ConfigRequiredScreen
 import net.muratov.intercom.ui.screens.FullscreenStreamScreen
 import net.muratov.intercom.ui.screens.IncomingCallOverlay
 import net.muratov.intercom.ui.screens.MyHomeContextSelectionDialog
@@ -77,6 +81,7 @@ private fun IntercomApp(
     val activity = LocalContext.current.findActivity()
     var selectedStreamId by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedStream = uiState.streams.firstOrNull { it.id == selectedStreamId }
+    val showConfigRequired = !uiState.isConfigValid
     val showWizard = uiState.proptechWizardRequired && !uiState.canEnterMainUi
 
     DisposableEffect(activity, view) {
@@ -91,7 +96,10 @@ private fun IntercomApp(
         }
     }
 
-    LaunchedEffect(uiState.proptechWizardRequired) {
+    LaunchedEffect(uiState.isConfigValid, uiState.proptechWizardRequired) {
+        if (!uiState.isConfigValid) {
+            return@LaunchedEffect
+        }
         if (uiState.proptechWizardRequired) {
             viewModel.startRegistrationIfNeeded()
         } else {
@@ -99,14 +107,21 @@ private fun IntercomApp(
         }
     }
 
-    LaunchedEffect(uiState.canEnterMainUi) {
-        if (uiState.canEnterMainUi) {
+    LaunchedEffect(uiState.isConfigValid, uiState.canEnterMainUi) {
+        if (uiState.isConfigValid && uiState.canEnterMainUi) {
             viewModel.startMainIfNeeded()
         }
     }
 
+    IncomingCallRingtoneEffect(isRinging = uiState.incomingCall != null)
+
     Box(modifier = Modifier.fillMaxSize()) {
-        if (showWizard) {
+        if (showConfigRequired) {
+            ConfigRequiredScreen(
+                configFilePath = uiState.configFilePath,
+                message = uiState.configErrorMessage ?: "Необходима конфигурация для приложения",
+            )
+        } else if (showWizard) {
             ProptechRegistrationWizardScreen(
                 providerState = uiState.myHomeProviderState,
                 onStart = viewModel::restartRegistration,
@@ -178,6 +193,46 @@ private fun IntercomApp(
                 onSubmit = viewModel::submitVerificationCode,
             )
         }
+    }
+}
+
+@Composable
+private fun IncomingCallRingtoneEffect(isRinging: Boolean) {
+    val context = LocalContext.current
+    val ringtone = androidx.compose.runtime.remember(context) {
+        runCatching {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            RingtoneManager.getRingtone(context.applicationContext, uri)
+        }.getOrNull()
+    }
+
+    DisposableEffect(isRinging, ringtone) {
+        if (isRinging) {
+            ringtone?.playLooping()
+        } else {
+            ringtone?.stopSafely()
+        }
+        onDispose {
+            ringtone?.stopSafely()
+        }
+    }
+}
+
+private fun Ringtone.playLooping() {
+    runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            isLooping = true
+        }
+        if (!isPlaying) {
+            play()
+        }
+    }
+}
+
+private fun Ringtone.stopSafely() {
+    runCatching {
+        stop()
     }
 }
 

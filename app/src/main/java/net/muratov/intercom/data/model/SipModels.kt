@@ -41,6 +41,7 @@ data class CallSession(
     val callId: String,
     val remoteDisplayName: String,
     val remoteAddress: String,
+    val providerTitle: String? = null,
     val hasVideo: Boolean,
     val direction: CallDirection,
     val stateLabel: String,

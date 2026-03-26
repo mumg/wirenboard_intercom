@@ -20,6 +20,9 @@ import net.muratov.intercom.provider.myhome.MyHomeProviderState
 import net.muratov.intercom.provider.myhome.MyHomeVerificationPrompt
 
 data class MainUiState(
+    val isConfigValid: Boolean = true,
+    val configFilePath: String = "",
+    val configErrorMessage: String? = null,
     val streams: List<RtspStream> = emptyList(),
     val sipAccounts: List<SipAccountState> = emptyList(),
     val incomingCall: CallSession? = null,
@@ -43,6 +46,9 @@ class MainViewModel(
         container.myHomeProviderService.state,
     ) { streams, accounts, incomingCall, activeCall, providerState ->
         MainUiState(
+            isConfigValid = container.isConfigValid,
+            configFilePath = container.configFilePath,
+            configErrorMessage = container.configErrorMessage,
             streams = streams,
             sipAccounts = accounts,
             incomingCall = incomingCall,

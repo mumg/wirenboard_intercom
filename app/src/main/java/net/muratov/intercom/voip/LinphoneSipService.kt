@@ -11,7 +11,9 @@ import net.muratov.intercom.data.model.SipRegistrationStatus
 import net.muratov.intercom.data.model.SipTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +42,7 @@ class LinphoneSipService(
     companion object {
         private const val TAG = "LinphoneSipService"
         private const val SIP_UNAVAILABLE_MESSAGE = "SIP/video is unavailable on this device"
+        private const val INCOMING_CALL_TIMEOUT_MS = 30_000L
     }
 
     private val appContext = context.applicationContext
@@ -61,6 +64,7 @@ class LinphoneSipService(
 
     private var remoteTextureView: TextureView? = null
     private var currentCall: Call? = null
+    private var incomingCallTimeoutJob: Job? = null
 
     private val core: Core by lazy {
         createSafeCore().apply {
@@ -105,6 +109,7 @@ class LinphoneSipService(
     override fun answerIncomingCall() {
         getCoreOrNull() ?: return
         val call = currentCall ?: return
+        cancelIncomingCallTimeout()
         val params: CallParams = core.createCallParams(call) ?: return
         params.isVideoEnabled = true
         params.videoDirection = MediaDirection.RecvOnly
@@ -112,11 +117,13 @@ class LinphoneSipService(
     }
 
     override fun declineIncomingCall() {
+        cancelIncomingCallTimeout()
         currentCall?.decline(org.linphone.core.Reason.Declined)
         clearCallState()
     }
 
     override fun endCurrentCall() {
+        cancelIncomingCallTimeout()
         currentCall?.terminate()
         clearCallState()
     }
@@ -125,8 +132,17 @@ class LinphoneSipService(
         val core = getCoreOrNull() ?: return
         remoteTextureView = textureView
         core.nativeVideoWindowId = textureView
-        currentCall?.let {
-            updateCallStates(it, it.state)
+        currentCall?.let { call ->
+            if (
+                call.state == Call.State.IncomingReceived ||
+                call.state == Call.State.IncomingEarlyMedia ||
+                call.state == Call.State.UpdatedByRemote ||
+                call.state == Call.State.EarlyUpdatedByRemote
+            ) {
+                ensureIncomingEarlyMedia(call)
+                acceptRemoteVideoUpdate(call)
+            }
+            updateCallStates(call, call.state)
         }
     }
 
@@ -269,6 +285,7 @@ class LinphoneSipService(
             callId = call.callLog.callId ?: "call",
             remoteDisplayName = call.remoteAddress.displayName ?: call.remoteAddress.username.orEmpty(),
             remoteAddress = call.remoteAddress.asStringUriOnly(),
+            providerTitle = accountConfig?.title?.takeIf { it.isNotBlank() },
             hasVideo = call.currentParams.isVideoEnabled || call.remoteParams?.isVideoEnabled == true,
             direction = if (call.dir == Call.Dir.Incoming) CallDirection.Incoming else CallDirection.Outgoing,
             stateLabel = state.name,
@@ -278,9 +295,14 @@ class LinphoneSipService(
         when (state) {
             Call.State.IncomingReceived,
             Call.State.IncomingEarlyMedia,
+            Call.State.EarlyUpdatedByRemote,
             Call.State.UpdatedByRemote -> {
+                scheduleIncomingCallTimeout(call)
                 if (state == Call.State.IncomingReceived) {
                     ensureIncomingEarlyMedia(call)
+                }
+                if (state == Call.State.UpdatedByRemote || state == Call.State.EarlyUpdatedByRemote) {
+                    acceptRemoteVideoUpdate(call)
                 }
                 _incomingCall.value = session
                 if (remoteTextureView != null) {
@@ -290,6 +312,7 @@ class LinphoneSipService(
 
             Call.State.StreamsRunning,
             Call.State.Connected -> {
+                cancelIncomingCallTimeout()
                 _incomingCall.value = null
                 _activeCall.value = session
             }
@@ -297,6 +320,7 @@ class LinphoneSipService(
             Call.State.End,
             Call.State.Error,
             Call.State.Released -> {
+                cancelIncomingCallTimeout()
                 clearCallState()
             }
 
@@ -309,9 +333,35 @@ class LinphoneSipService(
     }
 
     private fun clearCallState() {
+        cancelIncomingCallTimeout()
         _incomingCall.value = null
         _activeCall.value = null
         currentCall = null
+    }
+
+    private fun scheduleIncomingCallTimeout(call: Call) {
+        val callId = call.callLog.callId ?: return
+        val activeTimeout = incomingCallTimeoutJob
+        if (activeTimeout?.isActive == true) return
+
+        incomingCallTimeoutJob = scope.launch {
+            delay(INCOMING_CALL_TIMEOUT_MS)
+            val sameCall = currentCall?.callLog?.callId == callId
+            val isStillIncoming = _incomingCall.value?.callId == callId
+            if (sameCall && isStillIncoming) {
+                runCatching {
+                    call.decline(org.linphone.core.Reason.Declined)
+                }.onFailure { error ->
+                    Log.w(TAG, "Unable to auto-decline timed out incoming call", error)
+                }
+                clearCallState()
+            }
+        }
+    }
+
+    private fun cancelIncomingCallTimeout() {
+        incomingCallTimeoutJob?.cancel()
+        incomingCallTimeoutJob = null
     }
 
     private fun ensureIncomingEarlyMedia(call: Call) {
@@ -323,6 +373,18 @@ class LinphoneSipService(
             call.acceptEarlyMediaWithParams(params)
         }.onFailure { error ->
             Log.w(TAG, "Unable to accept incoming early media", error)
+        }
+    }
+
+    private fun acceptRemoteVideoUpdate(call: Call) {
+        val core = getCoreOrNull() ?: return
+        runCatching {
+            val params = core.createCallParams(call) ?: return
+            params.isVideoEnabled = true
+            params.videoDirection = MediaDirection.RecvOnly
+            call.acceptUpdate(params)
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to accept remote video update", error)
         }
     }
 
@@ -344,6 +406,10 @@ class LinphoneSipService(
             state: Call.State,
             message: String,
         ) {
+            if (state == Call.State.UpdatedByRemote || state == Call.State.EarlyUpdatedByRemote) {
+                runCatching { call.deferUpdate() }
+                    .onFailure { error -> Log.w(TAG, "Unable to defer remote call update", error) }
+            }
             scope.launch {
                 updateCallStates(call, state)
             }
