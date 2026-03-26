@@ -27,6 +27,7 @@ interface MyHomeProviderService {
     suspend fun registerSipDevice(placeId: Long, accessControlId: Long): MyHomeSipDevice
     suspend fun getPlaceCameras(placeId: Long): List<MyHomeCameraResource>
     suspend fun getPlacePublicCameras(placeId: Long): List<MyHomeCameraResource>
+    suspend fun getForpostCameraVideoUrl(externalCameraId: String): String?
     suspend fun getAvailableStompFeatures(): String?
     suspend fun getPlaceFinance(placeId: Long): MyHomeFinanceInfo?
 }

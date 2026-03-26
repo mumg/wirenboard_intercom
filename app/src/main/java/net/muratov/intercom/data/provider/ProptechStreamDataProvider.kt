@@ -34,7 +34,11 @@ class ProptechStreamDataProvider(
         val previewUrl = accessControl?.let {
             "${providerService.baseUrl}/rest/v1/places/$placeId/accesscontrols/${it.id}/videosnapshots"
         }
-        val rtspUrl = camera?.extractRtspUrl()
+        val rtspUrl = accessControl?.externalCameraId
+            ?.let { externalCameraId ->
+                runCatching { providerService.getForpostCameraVideoUrl(externalCameraId) }.getOrNull()
+            }
+            ?: camera?.extractRtspUrl()
         if (rtspUrl.isNullOrBlank()) return null
 
         return RtspStream(

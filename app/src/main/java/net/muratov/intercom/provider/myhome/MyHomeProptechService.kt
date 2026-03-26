@@ -29,6 +29,10 @@ class MyHomeProptechService(
 
     companion object {
         private const val TAG = "MyHomeProptechService"
+        private const val HTTP_TAG = "IntercomHttpProptech"
+        private const val PROPTECH_APP_ID = "erth"
+        private const val PROPTECH_APP_VERSION_NAME = "8.7.1"
+        private const val PROPTECH_APP_VERSION_CODE = "8070101"
         private const val PREFS_NAME = "proptech_auth"
         private const val KEY_TOKEN_TYPE = "token_type"
         private const val KEY_ACCESS_TOKEN = "access_token"
@@ -356,6 +360,18 @@ class MyHomeProptechService(
         return getCameraResources("/rest/v2/places/$placeId/public/cameras")
     }
 
+    override suspend fun getForpostCameraVideoUrl(externalCameraId: String): String? {
+        if (externalCameraId.isBlank()) return null
+        val json = requestJson(
+            path = "/rest/v1/forpost/cameras/$externalCameraId/video?LightStream=0&Format=H264",
+            method = "GET",
+            bearerToken = requireTokens().authorizationHeader,
+        ).asObject()
+        return json.optJSONObject("data")
+            ?.optString("URL")
+            ?.takeIf { it.isNotBlank() }
+    }
+
     override suspend fun getAvailableStompFeatures(): String? {
         return requestJson(
             path = "/rest/v1/stomp/available-features",
@@ -379,7 +395,7 @@ class MyHomeProptechService(
             method = "GET",
             bearerToken = requireTokens().authorizationHeader,
         ).asObject()
-        return json.optJSONArray("data").toList().mapNotNull { item ->
+        val result = json.optJSONArray("data").toList().mapNotNull { item ->
             item as? JSONObject ?: return@mapNotNull null
             MyHomeCameraResource(
                 id = item.opt("id")?.toString().orEmpty(),
@@ -387,6 +403,7 @@ class MyHomeProptechService(
                 rawJson = item.toString(),
             )
         }
+        return result
     }
 
     private suspend fun startPhoneConfirmation(loginContext: MyHomeLoginContext) {
@@ -463,7 +480,9 @@ class MyHomeProptechService(
         expectedCodes: Set<Int> = setOf(HttpURLConnection.HTTP_OK),
     ): JsonResponse = withContext(Dispatchers.IO) {
         val connection = openConnection(path, method, bearerToken)
+        val startNs = System.nanoTime()
         try {
+            logHttpRequest(connection, body)
             if (body != null) {
                 connection.doOutput = true
                 BufferedOutputStream(connection.outputStream).bufferedWriter().use { writer ->
@@ -473,6 +492,7 @@ class MyHomeProptechService(
 
             val responseCode = connection.responseCode
             val text = connection.readText()
+            logHttpResponse(connection, responseCode, text, startNs)
             if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED && bearerToken != null) {
                 clearAuthorizedSession("Сессия Proptech истекла, выполните вход заново")
             }
@@ -490,18 +510,24 @@ class MyHomeProptechService(
         bearerToken: String? = null,
     ): ByteArray = withContext(Dispatchers.IO) {
         val connection = openConnection(path, "GET", bearerToken)
+        val startNs = System.nanoTime()
         try {
+            logHttpRequest(connection, body = null)
             val responseCode = connection.responseCode
             if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED && bearerToken != null) {
                 clearAuthorizedSession("Сессия Proptech истекла, выполните вход заново")
             }
             if (responseCode != HttpURLConnection.HTTP_OK) {
-                throw IllegalStateException("HTTP $responseCode: ${connection.readText()}")
+                val errorText = connection.readText()
+                logHttpResponse(connection, responseCode, errorText, startNs)
+                throw IllegalStateException("HTTP $responseCode: $errorText")
             }
             BufferedInputStream(connection.inputStream).use { input ->
                 ByteArrayOutputStream().use { output ->
                     input.copyTo(output)
-                    output.toByteArray()
+                    output.toByteArray().also { bytes ->
+                        logHttpBinaryResponse(connection, responseCode, bytes.size, startNs)
+                    }
                 }
             }
         } finally {
@@ -515,14 +541,19 @@ class MyHomeProptechService(
         bearerToken: String?,
     ): HttpURLConnection {
         val url = URL("$baseUrl$path")
+        val operatorIdHeader = tokens?.operatorId?.takeIf {
+            (path.startsWith("/rest/v1/places/") && path.endsWith("/cameras")) ||
+                path.startsWith("/rest/v1/forpost/cameras/") && path.contains("/video")
+        }
         return (url.openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 15_000
             readTimeout = 15_000
             setRequestProperty("Accept", "application/json, image/jpeg, */*")
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            setRequestProperty("User-Agent", "Intercom/${BuildConfig.VERSION_NAME}")
+            setRequestProperty("User-Agent", buildProptechUserAgent())
             bearerToken?.let { setRequestProperty("Authorization", it) }
+            operatorIdHeader?.let { setRequestProperty("Operator", it.toString()) }
         }
     }
 
@@ -531,10 +562,116 @@ class MyHomeProptechService(
         return stream.bufferedReader().use { it.readText() }
     }
 
+    private fun logHttpRequest(
+        connection: HttpURLConnection,
+        body: String?,
+    ) {
+        Log.d(
+            HTTP_TAG,
+            buildString {
+                append("REQUEST ")
+                append(connection.requestMethod)
+                append(' ')
+                append(connection.url)
+                append('\n')
+                append("headers=")
+                append(connection.requestProperties.sanitizedHeaders())
+                if (!body.isNullOrBlank()) {
+                    append('\n')
+                    append("body=")
+                    append(body)
+                }
+            },
+        )
+    }
+
+    private fun logHttpResponse(
+        connection: HttpURLConnection,
+        responseCode: Int,
+        body: String,
+        startNs: Long,
+    ) {
+        Log.d(
+            HTTP_TAG,
+            buildString {
+                append("RESPONSE ")
+                append(responseCode)
+                append(' ')
+                append(connection.requestMethod)
+                append(' ')
+                append(connection.url)
+                append(" in ")
+                append((System.nanoTime() - startNs) / 1_000_000)
+                append(" ms")
+                append('\n')
+                append("headers=")
+                append(connection.headerFields.sanitizedHeaders())
+                if (body.isNotBlank()) {
+                    append('\n')
+                    append("body=")
+                    append(body)
+                }
+            },
+        )
+    }
+
+    private fun logHttpBinaryResponse(
+        connection: HttpURLConnection,
+        responseCode: Int,
+        byteCount: Int,
+        startNs: Long,
+    ) {
+        Log.d(
+            HTTP_TAG,
+            buildString {
+                append("RESPONSE ")
+                append(responseCode)
+                append(' ')
+                append(connection.requestMethod)
+                append(' ')
+                append(connection.url)
+                append(" in ")
+                append((System.nanoTime() - startNs) / 1_000_000)
+                append(" ms")
+                append('\n')
+                append("headers=")
+                append(connection.headerFields.sanitizedHeaders())
+                append('\n')
+                append("binaryBytes=")
+                append(byteCount)
+            },
+        )
+    }
+
     private fun defaultInstallationId(): String {
         val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
             ?.takeIf { it.isNotBlank() }
         return androidId ?: config.installationId.ifBlank { "android-id-unavailable" }
+    }
+
+    private fun buildProptechUserAgent(): String {
+        val operatorId = tokens?.operatorId?.toString() ?: "null"
+        val placeId = _state.value.selectedPlaceId?.toString() ?: "null"
+        val installationId = defaultInstallationId()
+        return buildString {
+            append(Build.MANUFACTURER)
+            append(' ')
+            append(Build.MODEL)
+            append(" | Android ")
+            append(Build.VERSION.RELEASE ?: "unknown")
+            append(" | ")
+            append(PROPTECH_APP_ID)
+            append(" | ")
+            append(PROPTECH_APP_VERSION_NAME)
+            append(" (")
+            append(PROPTECH_APP_VERSION_CODE)
+            append(") | | ")
+            append(operatorId)
+            append(" | ")
+            append(installationId)
+            append(" | ")
+            append(placeId)
+        }
     }
 
     private fun persistSession(tokens: MyHomeTokens, selectedPlaceId: Long) {
@@ -609,4 +746,18 @@ private fun JSONObject.optLongOrNull(key: String): Long? {
 
 private fun JSONObject.optIntOrNull(key: String): Int? {
     return if (isNull(key)) null else optInt(key)
+}
+
+private fun Map<String, List<String>?>.sanitizedHeaders(): Map<String, List<String>> {
+    return entries.associate { (key, values) ->
+        val safeKey = key.orEmpty()
+        val safeValues = values.orEmpty().map { value ->
+            if (safeKey.equals("Authorization", ignoreCase = true)) {
+                value.take(24) + "..."
+            } else {
+                value
+            }
+        }
+        safeKey to safeValues
+    }
 }
