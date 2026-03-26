@@ -3,6 +3,7 @@ package net.muratov.intercom.data.provider
 import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.data.model.StreamSourceConfig
+import net.muratov.intercom.data.model.StreamPlaybackEngine
 import net.muratov.intercom.provider.myhome.MyHomeAccessControl
 import net.muratov.intercom.provider.myhome.MyHomeCameraResource
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
@@ -45,6 +46,7 @@ class ProptechStreamDataProvider(
             id = source.id,
             title = source.title,
             rtspUrl = rtspUrl,
+            playbackEngine = StreamPlaybackEngine.EXO_PLAYER,
             rtspExtras = mapOf("Authorization" to tokens.authorizationHeader),
             previewUrl = previewUrl,
             previewReloadPeriodMs = source.provider.previewReloadPeriodMs ?: 15_000L,

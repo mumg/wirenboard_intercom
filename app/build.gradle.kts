@@ -83,6 +83,7 @@ configurations.configureEach {
 dependencies {
     val composeUiVersion = "1.6.8"
     val geckoViewVersion = "147.0.20260212191108"
+    val media3Version = "1.4.1"
 
     constraints {
         implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.24") {
@@ -122,8 +123,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:$composeUiVersion")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.mozilla.geckoview:geckoview:$geckoViewVersion")
+    implementation("androidx.media3:media3-exoplayer:$media3Version")
+    implementation("androidx.media3:media3-exoplayer-rtsp:$media3Version")
+    implementation("androidx.media3:media3-ui:$media3Version")
     implementation("org.videolan.android:libvlc-all:3.6.5")
+    implementation("org.mozilla.geckoview:geckoview:$geckoViewVersion")
     implementation("org.linphone:linphone-sdk-android:5.3.0")
 
     testImplementation("junit:junit:4.13.2")

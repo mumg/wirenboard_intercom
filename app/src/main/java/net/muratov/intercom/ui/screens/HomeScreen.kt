@@ -311,6 +311,8 @@ private fun StreamTile(
                     else -> {
                         RtspPlayer(
                             url = stream.rtspUrl,
+                            playbackEngine = stream.playbackEngine,
+                            headers = stream.rtspExtras,
                             muted = true,
                             modifier = Modifier.fillMaxSize(),
                         )

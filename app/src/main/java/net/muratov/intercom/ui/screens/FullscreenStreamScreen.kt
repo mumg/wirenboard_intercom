@@ -34,6 +34,8 @@ fun FullscreenStreamScreen(
     ) {
         RtspPlayer(
             url = stream.rtspUrl,
+            playbackEngine = stream.playbackEngine,
+            headers = stream.rtspExtras,
             muted = false,
             modifier = Modifier.fillMaxSize(),
         )
