@@ -2,8 +2,13 @@ package net.muratov.intercom.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
@@ -26,6 +31,7 @@ fun FullscreenStreamScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.End))
             .background(
                 Brush.verticalGradient(
                     listOf(Color.Black, Color(0xFF02131D)),

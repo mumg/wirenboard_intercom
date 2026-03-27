@@ -38,7 +38,7 @@ class SipAccountRepository(
     }
 
     suspend fun refresh() {
-        _accounts.value = sources.mapNotNull { source ->
+        val resolvedAccounts = sources.mapNotNull { source ->
             runCatching {
                 var resolved: SipAccountConfig? = null
                 for (provider in providers) {
@@ -51,5 +51,7 @@ class SipAccountRepository(
                 Log.w(TAG, "Unable to resolve SIP account ${source.id}", error)
             }.getOrNull()
         }
+        Log.d(TAG, "refresh(): sources=${sources.size} resolved=${resolvedAccounts.size}")
+        _accounts.value = resolvedAccounts
     }
 }

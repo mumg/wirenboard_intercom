@@ -20,8 +20,9 @@ import net.muratov.intercom.data.model.AppConfig
 import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.provider.myhome.MyHomeProptechService
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
-import net.muratov.intercom.voip.SafeSipService
-import net.muratov.intercom.voip.SipService
+import net.muratov.intercom.voip.SipCoreManager
+import net.muratov.intercom.voip.SipCredentials
+import org.linphone.core.TransportType
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainApplication : Application() {
@@ -31,6 +32,7 @@ class MainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         AppCrashRestarter.install(this)
+        SipCoreManager.initialize(this)
         val configResult = AppConfigLoader(this).load()
         val config = (configResult as? AppConfigLoadResult.Success)?.config ?: AppConfig()
         val isConfigValid = configResult is AppConfigLoadResult.Success
@@ -70,7 +72,6 @@ class MainApplication : Application() {
                 myHomeProviderService = myHomeProviderService,
             ),
             myHomeProviderService = myHomeProviderService,
-            sipService = SafeSipService(this),
             proptechWizardRequired = hasProptechConsumers,
             providers = providers,
         )
@@ -85,7 +86,6 @@ data class AppContainer(
     val streamRepository: StreamRepository,
     val sipAccountRepository: SipAccountRepository,
     val myHomeProviderService: MyHomeProviderService,
-    val sipService: SipService,
     val proptechWizardRequired: Boolean,
     private val providers: List<IntercomProvider>,
 ) {
@@ -122,7 +122,17 @@ data class AppContainer(
             runCatching {
                 scope.launch {
                     sipAccountRepository.accounts.collectLatest { accounts ->
-                        sipService.start(accounts)
+                        Log.d("AppContainer", "Starting SIP with ${accounts.size} accounts")
+                        accounts.forEach {
+                            SipCoreManager.register(SipCredentials(
+                                it.username,
+                                it.password,
+                                it.domain,
+                                it.domain,
+                                TransportType.Udp,
+                                it.id
+                            ))
+                        }
                     }
                 }
             }.onFailure { error ->

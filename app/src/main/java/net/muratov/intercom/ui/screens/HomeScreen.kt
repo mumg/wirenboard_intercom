@@ -1,7 +1,6 @@
 package net.muratov.intercom.ui.screens
 
 import android.content.Context
-import android.graphics.Color as AndroidColor
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -33,12 +32,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -49,6 +48,7 @@ import net.muratov.intercom.video.RtspPlayer
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebRequestError
+import android.graphics.Color as AndroidColor
 
 @Composable
 fun HomeScreen(

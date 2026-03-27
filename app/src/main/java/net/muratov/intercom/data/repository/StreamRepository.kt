@@ -40,16 +40,28 @@ class StreamRepository(
     suspend fun refresh() {
         _streams.value = sources.mapNotNull { source ->
             runCatching {
-                var resolved: RtspStream? = null
-                for (provider in providers) {
-                    if (provider.type != source.provider.type) continue
-                    resolved = provider.resolveStream(source)
-                    if (resolved != null) break
-                }
-                resolved
+                resolveSource(source)
             }.onFailure { error ->
                 Log.w(TAG, "Unable to resolve stream ${source.id}", error)
             }.getOrNull()
         }
+    }
+
+    suspend fun resolveStream(streamId: String): RtspStream? {
+        val source = sources.firstOrNull { it.id == streamId } ?: return null
+        return runCatching {
+            resolveSource(source)
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to resolve fullscreen stream ${source.id}", error)
+        }.getOrNull()
+    }
+
+    private suspend fun resolveSource(source: StreamSourceConfig): RtspStream? {
+        for (provider in providers) {
+            if (provider.type != source.provider.type) continue
+            val resolved = provider.resolveStream(source)
+            if (resolved != null) return resolved
+        }
+        return null
     }
 }

@@ -4,38 +4,38 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.media.Ringtone
-import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.BackHandler
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.ui.navigation.IntercomNavGraph
-import net.muratov.intercom.ui.screens.ActiveCallOverlay
 import net.muratov.intercom.ui.screens.ConfigRequiredScreen
 import net.muratov.intercom.ui.screens.FullscreenStreamScreen
-import net.muratov.intercom.ui.screens.IncomingCallOverlay
 import net.muratov.intercom.ui.screens.MyHomeContextSelectionDialog
 import net.muratov.intercom.ui.screens.MyHomeVerificationDialog
 import net.muratov.intercom.ui.screens.ProptechRegistrationWizardScreen
@@ -44,7 +44,6 @@ import net.muratov.intercom.ui.viewmodel.MainViewModel
 import net.muratov.intercom.ui.viewmodel.MainViewModelFactory
 
 class MainActivity : ComponentActivity() {
-
     private val viewModel: MainViewModel by viewModels {
         MainViewModelFactory((application as MainApplication).appContainer)
     }
@@ -53,16 +52,26 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { }
 
+    private lateinit var composeHost: ComposeView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        permissionsLauncher.launch(
-            arrayOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO,
-            ),
+        setContentView(R.layout.activity_main)
+        composeHost = findViewById(R.id.composeHost)
+        composeHost.setViewCompositionStrategy(
+            ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
         )
-        setContent {
+        permissionsLauncher.launch(
+            buildList {
+                add(Manifest.permission.CAMERA)
+                add(Manifest.permission.RECORD_AUDIO)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }.toTypedArray(),
+        )
+        composeHost.setContent {
             IntercomTheme {
                 IntercomApp(viewModel = viewModel, appContainer = (application as MainApplication).appContainer)
             }
@@ -77,10 +86,12 @@ private fun IntercomApp(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val navController = rememberNavController()
+    val context = LocalContext.current
     val view = LocalView.current
-    val activity = LocalContext.current.findActivity()
+    val activity = context.findActivity()
     var selectedStreamId by rememberSaveable { mutableStateOf<String?>(null) }
-    val selectedStream = uiState.streams.firstOrNull { it.id == selectedStreamId }
+    var fullscreenStream by remember { mutableStateOf<RtspStream?>(null) }
+    var isFullscreenStreamLoading by remember { mutableStateOf(false) }
     val showConfigRequired = !uiState.isConfigValid
     val showWizard = uiState.proptechWizardRequired && !uiState.canEnterMainUi
 
@@ -113,7 +124,20 @@ private fun IntercomApp(
         }
     }
 
-    IncomingCallRingtoneEffect(isRinging = uiState.incomingCall != null)
+    LaunchedEffect(selectedStreamId) {
+        val streamId = selectedStreamId
+        if (streamId == null) {
+            fullscreenStream = null
+            isFullscreenStreamLoading = false
+            return@LaunchedEffect
+        }
+        isFullscreenStreamLoading = true
+        fullscreenStream = viewModel.resolveFullscreenStream(streamId)
+        isFullscreenStreamLoading = false
+        if (fullscreenStream == null) {
+            selectedStreamId = null
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (showConfigRequired) {
@@ -132,47 +156,31 @@ private fun IntercomApp(
                 navController = navController,
                 webViewUrl = appContainer.webViewUrl,
                 streams = uiState.streams,
-                browserVisible = selectedStream == null,
+                browserVisible = selectedStreamId == null,
                 onStreamSelected = { stream -> selectedStreamId = stream.id },
                 modifier = Modifier.fillMaxSize(),
             )
 
-            if (selectedStream != null) {
-                val openAction = selectedStream.openAction?.takeIf(viewModel::canOpen)
-                FullscreenStreamOverlay(
-                    stream = selectedStream,
-                    onDismiss = { selectedStreamId = null },
-                    onOpen = openAction?.let { action ->
-                        { viewModel.open(action) }
-                    },
-                )
-            }
-
-            uiState.incomingCall?.let { call ->
-                val openAction = call.openAction?.takeIf(viewModel::canOpen)
-                IncomingCallOverlay(
-                    callSession = call,
-                    sipService = appContainer.sipService,
-                    onAccept = viewModel::answerIncomingCall,
-                    onReject = viewModel::rejectIncomingCall,
-                    onOpen = openAction?.let { action ->
-                        { viewModel.open(action) }
-                    },
-                )
-            }
-
-            if (uiState.incomingCall == null) {
-                uiState.activeCall?.let { call ->
-                    val openAction = call.openAction?.takeIf(viewModel::canOpen)
-                    ActiveCallOverlay(
-                        callSession = call,
-                        sipService = appContainer.sipService,
-                        onHangup = viewModel::endActiveCall,
-                        onOpen = openAction?.let { action ->
-                            { viewModel.open(action) }
-                        },
+            if (selectedStreamId != null && isFullscreenStreamLoading) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
                     )
                 }
+            }
+
+            if (fullscreenStream != null) {
+                val openAction = fullscreenStream?.openAction?.takeIf(viewModel::canOpen)
+                FullscreenStreamOverlay(
+                    stream = fullscreenStream!!,
+                    onDismiss = {
+                        selectedStreamId = null
+                        fullscreenStream = null
+                    },
+                    onOpen = openAction?.let { action ->
+                        { viewModel.open(action) }
+                    },
+                )
             }
         }
 
@@ -193,46 +201,6 @@ private fun IntercomApp(
                 onSubmit = viewModel::submitVerificationCode,
             )
         }
-    }
-}
-
-@Composable
-private fun IncomingCallRingtoneEffect(isRinging: Boolean) {
-    val context = LocalContext.current
-    val ringtone = androidx.compose.runtime.remember(context) {
-        runCatching {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            RingtoneManager.getRingtone(context.applicationContext, uri)
-        }.getOrNull()
-    }
-
-    DisposableEffect(isRinging, ringtone) {
-        if (isRinging) {
-            ringtone?.playLooping()
-        } else {
-            ringtone?.stopSafely()
-        }
-        onDispose {
-            ringtone?.stopSafely()
-        }
-    }
-}
-
-private fun Ringtone.playLooping() {
-    runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            isLooping = true
-        }
-        if (!isPlaying) {
-            play()
-        }
-    }
-}
-
-private fun Ringtone.stopSafely() {
-    runCatching {
-        stop()
     }
 }
 

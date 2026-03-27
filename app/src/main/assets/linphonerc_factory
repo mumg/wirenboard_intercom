@@ -1,0 +1,10 @@
+[sip]
+use_info=1
+use_rfc2833=1
+
+[net]
+download_bw=0
+upload_bw=0
+
+[video]
+size=vga

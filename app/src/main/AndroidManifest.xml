@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -20,6 +21,21 @@
         android:theme="@style/Theme.Intercom"
         android:usesCleartextTraffic="true">
         <activity
+            android:name=".voip.IncomingCallActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.Intercom"
+            android:turnScreenOn="true" />
+        <activity
+            android:name=".voip.InCallActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.Intercom" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:hardwareAccelerated="true"
@@ -30,7 +46,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
         <receiver
             android:name=".BootCompletedReceiver"
             android:enabled="true"

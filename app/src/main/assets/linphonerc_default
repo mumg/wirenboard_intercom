@@ -1,0 +1,24 @@
+[sip]
+contact="Linphone Simple Receiver" <sip:simple.receiver@unknown-host>
+use_info=1
+use_ipv6=1
+keepalive_period=30000
+sip_port=-1
+sip_tcp_port=-1
+sip_tls_port=-1
+media_encryption=none
+incoming_calls_early_media=1
+
+[net]
+download_bw=0
+upload_bw=0
+
+[video]
+size=vga
+automatically_accept=1
+automatically_initiate=0
+automatically_accept_direction=2
+
+[misc]
+real_early_media=1
+max_calls=1

@@ -40,19 +40,13 @@ class MainViewModel(
 
     val uiState: StateFlow<MainUiState> = combine(
         container.streamRepository.streams,
-        container.sipService.accountStates,
-        container.sipService.incomingCall,
-        container.sipService.activeCall,
         container.myHomeProviderService.state,
-    ) { streams, accounts, incomingCall, activeCall, providerState ->
+    ) { streams, providerState ->
         MainUiState(
             isConfigValid = container.isConfigValid,
             configFilePath = container.configFilePath,
             configErrorMessage = container.configErrorMessage,
             streams = streams,
-            sipAccounts = accounts,
-            incomingCall = incomingCall,
-            activeCall = activeCall,
             myHomeProviderState = providerState,
             contextSelectionPrompt = providerState.contextSelectionPrompt,
             verificationPrompt = providerState.verificationPrompt,
@@ -65,17 +59,6 @@ class MainViewModel(
         initialValue = MainUiState(),
     )
 
-    fun answerIncomingCall() {
-        container.sipService.answerIncomingCall()
-    }
-
-    fun rejectIncomingCall() {
-        container.sipService.declineIncomingCall()
-    }
-
-    fun endActiveCall() {
-        container.sipService.endCurrentCall()
-    }
 
     fun submitVerificationCode(code: String, confirmationSecret: String) {
         container.myHomeProviderService.submitVerificationCode(code, confirmationSecret)
@@ -109,6 +92,10 @@ class MainViewModel(
         viewModelScope.launch {
             container.open(action)
         }
+    }
+
+    suspend fun resolveFullscreenStream(streamId: String): RtspStream? {
+        return container.streamRepository.resolveStream(streamId)
     }
 }
 

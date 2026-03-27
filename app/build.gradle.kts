@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "net.muratov.intercom"
-        minSdk = 29
+        minSdk = 27
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -44,6 +44,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        viewBinding = true
     }
 
     composeOptions {
@@ -69,6 +70,7 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
 }
 
 configurations.configureEach {
@@ -128,7 +130,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:$media3Version")
     implementation("org.videolan.android:libvlc-all:3.6.5")
     implementation("org.mozilla.geckoview:geckoview:$geckoViewVersion")
-    implementation("org.linphone:linphone-sdk-android:5.3.0")
+    implementation("org.linphone:linphone-sdk-android:5.4.97")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
