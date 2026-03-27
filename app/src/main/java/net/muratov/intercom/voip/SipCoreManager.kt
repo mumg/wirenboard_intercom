@@ -72,8 +72,10 @@ object SipCoreManager {
     private var cameraAllowed = false
     private var incomingActivityLaunchRequested = false
     private var inCallActivityLaunchRequested = false
+    private var activeCallAccountId: String? = null
 
     private var pendingCredentials: MutableList<SipCredentials> = mutableListOf()
+    private val accountIdByUsername = mutableMapOf<String, String>()
 
     private val coreListener = object : CoreListenerStub() {
         override fun onGlobalStateChanged(core: Core, state: GlobalState, message: String) {
@@ -112,6 +114,11 @@ object SipCoreManager {
                     currentState != Call.State.Error &&
                     currentState != Call.State.Released
             activeCall = if (callStillActive) call else null
+            activeCallAccountId = if (callStillActive) {
+                call.toAddress.username?.let(accountIdByUsername::get)
+            } else {
+                null
+            }
 
             if (call.dir == Call.Dir.Incoming &&
                 (currentState == Call.State.IncomingReceived || currentState == Call.State.IncomingEarlyMedia) &&
@@ -227,7 +234,7 @@ object SipCoreManager {
 
     fun answerIncomingCall() {
         onCoreThread { core ->
-            val call = activeCall ?: core.currentCall ?: return@onCoreThread
+            val call = findCurrentManagedCall(core) ?: return@onCoreThread
             val params = core.createCallParams(call)
             if (params == null) {
                 call.accept()
@@ -246,7 +253,7 @@ object SipCoreManager {
 
     fun terminateCurrentCall() {
         onCoreThread { core ->
-            val call = activeCall ?: core.currentCall ?: return@onCoreThread
+            val call = findCurrentManagedCall(core) ?: return@onCoreThread
             if (call.dir == Call.Dir.Incoming &&
                 (call.state == Call.State.IncomingReceived || call.state == Call.State.IncomingEarlyMedia)
             ) {
@@ -261,8 +268,23 @@ object SipCoreManager {
         return lastCallSnapshot
     }
 
+    fun getCurrentCallAccountId(): String? {
+        return activeCallAccountId
+    }
+
+    private fun findCurrentManagedCall(core: Core): Call? {
+        return activeCall
+            ?: core.currentCall
+            ?: core.calls.firstOrNull { call ->
+                call.state != Call.State.End &&
+                    call.state != Call.State.Error &&
+                    call.state != Call.State.Released
+            }
+    }
+
 
     private fun registerInternal(credentials: SipCredentials) {
+        accountIdByUsername[credentials.username] = credentials.id
         val identityAddress = Factory.instance().createAddress(
             "sip:${credentials.username}@${credentials.domain}"
         ) ?: run {

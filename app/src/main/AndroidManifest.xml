@@ -29,13 +29,6 @@
             android:theme="@style/Theme.Intercom"
             android:turnScreenOn="true" />
         <activity
-            android:name=".voip.InCallActivity"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:showWhenLocked="true"
-            android:theme="@style/Theme.Intercom" />
-        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:hardwareAccelerated="true"

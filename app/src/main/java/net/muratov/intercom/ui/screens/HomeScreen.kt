@@ -63,6 +63,7 @@ fun HomeScreen(
         screenWidth > 1000.dp -> 240.dp
         else -> 208.dp
     }
+    val hasStreams = streams.isNotEmpty()
 
     Box(
         modifier = Modifier
@@ -73,25 +74,35 @@ fun HomeScreen(
                 ),
             ),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.End))
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
+        if (!hasStreams) {
             GeckoPane(
                 webViewUrl = webViewUrl,
                 browserVisible = browserVisible,
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
+                    .fillMaxSize(),
+                fullscreen = true,
             )
-            StreamsColumn(
-                streams = streams,
-                width = tileColumnWidth,
-                onStreamSelected = onStreamSelected,
-            )
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.End))
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                GeckoPane(
+                    webViewUrl = webViewUrl,
+                    browserVisible = browserVisible,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+                StreamsColumn(
+                    streams = streams,
+                    width = tileColumnWidth,
+                    onStreamSelected = onStreamSelected,
+                )
+            }
         }
     }
 }
@@ -101,21 +112,22 @@ private fun GeckoPane(
     webViewUrl: String,
     browserVisible: Boolean,
     modifier: Modifier = Modifier,
+    fullscreen: Boolean = false,
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
+        shape = if (fullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(28.dp),
         color = Color(0xFF0D1624),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(2.dp),
+                .then(if (fullscreen) Modifier else Modifier.padding(2.dp)),
         ) {
             AndroidView(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(26.dp)),
+                    .then(if (fullscreen) Modifier else Modifier.clip(RoundedCornerShape(26.dp))),
                 factory = { context ->
                     GeckoBrowserView(context).apply {
                         bindUrl(webViewUrl)

@@ -8,13 +8,18 @@ import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import org.linphone.core.Call
+import kotlinx.coroutines.launch
 import net.muratov.intercom.databinding.ActivityIncomingCallBinding
 class IncomingCallActivity : AppCompatActivity() {
     private lateinit var binding: ActivityIncomingCallBinding
 
     private var microphoneGranted = false
     private var cameraGranted = false
+
+    private val appContainer: net.muratov.intercom.AppContainer
+        get() = (application as net.muratov.intercom.MainApplication).appContainer
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -71,6 +76,17 @@ class IncomingCallActivity : AppCompatActivity() {
         binding.hangupButton.setOnClickListener {
             SipCoreManager.terminateCurrentCall()
         }
+
+        binding.openButton.setOnClickListener {
+            val accountId = SipCoreManager.getCurrentCallAccountId() ?: return@setOnClickListener
+            val action = appContainer.sipAccountRepository.accounts.value
+                .firstOrNull { it.id == accountId }
+                ?.openAction
+                ?: return@setOnClickListener
+            lifecycleScope.launch {
+                appContainer.open(action)
+            }
+        }
     }
 
     private fun renderCall(snapshot: CallSnapshot?) {
@@ -87,11 +103,24 @@ class IncomingCallActivity : AppCompatActivity() {
                 snapshot.state != Call.State.Released
 
         if (activeCall && !incomingPending) {
+            binding.answerButton.visibility = View.GONE
+            binding.hangupButton.visibility = View.VISIBLE
+            val accountId = SipCoreManager.getCurrentCallAccountId()
+            val openAction = accountId?.let { id ->
+                appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == id }?.openAction
+            }
+            binding.openButton.visibility = if (openAction != null) View.VISIBLE else View.GONE
+            refreshVideoWindows()
             return
         }
 
         binding.answerButton.visibility = if (incomingPending) View.VISIBLE else View.GONE
         binding.hangupButton.visibility = if (activeCall) View.VISIBLE else View.GONE
+        val accountId = SipCoreManager.getCurrentCallAccountId()
+        val openAction = accountId?.let { id ->
+            appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == id }?.openAction
+        }
+        binding.openButton.visibility = if (openAction != null) View.VISIBLE else View.GONE
 
         if (!activeCall) {
             finish()

@@ -28,12 +28,9 @@
 
     <LinearLayout
         android:id="@+id/callActionsBar"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
         android:layout_marginBottom="24dp"
-        android:background="@color/black"
         android:gravity="center"
         android:orientation="horizontal"
         android:padding="12dp"
@@ -41,20 +38,35 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
-        <com.google.android.material.button.MaterialButton
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/answerButton"
-            style="@style/Widget.Material3.Button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="12dp"
-            android:text="Answer" />
+            android:layout_marginEnd="20dp"
+            android:contentDescription="Answer"
+            android:src="@android:drawable/sym_action_call"
+            app:backgroundTint="#2AAE5C"
+            app:tint="@android:color/white" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/hangupButton"
-            style="@style/Widget.Material3.Button"
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/openButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Reject" />
+            android:layout_marginEnd="20dp"
+            android:contentDescription="Open"
+            android:src="@android:drawable/ic_lock_idle_lock"
+            android:visibility="gone"
+            app:backgroundTint="#2AAE5C"
+            app:tint="@android:color/white" />
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/hangupButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:contentDescription="Reject"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            app:backgroundTint="#C73A3A"
+            app:tint="@android:color/white" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
