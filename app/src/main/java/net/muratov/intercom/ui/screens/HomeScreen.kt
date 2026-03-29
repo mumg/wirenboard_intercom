@@ -273,7 +273,7 @@ private fun StreamsColumn(
     ) {
         val tileSpacing = 5.dp
         val visibleTileCount = 3
-        val tileHeight = (maxHeight - (tileSpacing * (visibleTileCount - 1))) / visibleTileCount
+        val tileHeight = ((maxHeight - (tileSpacing * (visibleTileCount - 1))) / visibleTileCount) * 0.95f
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),

@@ -126,7 +126,7 @@ object SipCoreManager {
             ) {
                 incomingActivityLaunchRequested = true
                 launchIncomingCallActivity()
-            }  else if (!callStillActive) {
+            } else if (!callStillActive) {
                 incomingActivityLaunchRequested = false
                 inCallActivityLaunchRequested = false
             }

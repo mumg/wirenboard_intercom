@@ -32,6 +32,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.ui.navigation.IntercomNavGraph
 import net.muratov.intercom.ui.screens.ConfigRequiredScreen
@@ -121,6 +123,21 @@ private fun IntercomApp(
     LaunchedEffect(uiState.isConfigValid, uiState.canEnterMainUi) {
         if (uiState.isConfigValid && uiState.canEnterMainUi) {
             viewModel.startMainIfNeeded()
+        }
+    }
+
+    LaunchedEffect(uiState.isConfigValid) {
+        if (uiState.isConfigValid) {
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            delay(5_000)
+            val application = activity?.application as? MainApplication ?: continue
+            application.reloadAppContainer()
+            if (application.appContainer.isConfigValid) {
+                activity.recreate()
+                break
+            }
         }
     }
 

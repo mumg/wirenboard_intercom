@@ -33,6 +33,10 @@ class MainApplication : Application() {
         super.onCreate()
         AppCrashRestarter.install(this)
         SipCoreManager.initialize(this)
+        reloadAppContainer()
+    }
+
+    fun reloadAppContainer() {
         val configResult = AppConfigLoader(this).load()
         val config = (configResult as? AppConfigLoadResult.Success)?.config ?: AppConfig()
         val isConfigValid = configResult is AppConfigLoadResult.Success
