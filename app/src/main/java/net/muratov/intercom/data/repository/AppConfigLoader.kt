@@ -3,6 +3,7 @@ package net.muratov.intercom.data.repository
 import android.content.Context
 import android.os.Environment
 import net.muratov.intercom.data.model.AppConfig
+import net.muratov.intercom.data.model.MqttConfig
 import net.muratov.intercom.data.model.SipAccountProviderConfig
 import net.muratov.intercom.data.model.SipAccountSourceConfig
 import net.muratov.intercom.data.model.SipTransport
@@ -60,6 +61,7 @@ class AppConfigLoader(
             streams = root.optJSONArray("streams").toStreamSources(),
             sipAccounts = root.optJSONArray("sipAccounts").toSipAccountSources(),
             myHomeProptech = root.optJSONArray("providers").toMyHomeProptechConfig(),
+            mqtt = root.optJSONObject("mqtt").toMqttConfig(),
         )
     }
 
@@ -143,6 +145,21 @@ class AppConfigLoader(
     private fun JSONObject?.toStringMap(): Map<String, String> {
         if (this == null) return emptyMap()
         return keys().asSequence().associateWith { key -> opt(key)?.toString().orEmpty() }
+    }
+
+    private fun JSONObject?.toMqttConfig(): MqttConfig {
+        if (this == null) return MqttConfig()
+        return MqttConfig(
+            serverUrl = optString("serverUrl")
+                .ifBlank { optString("server") }
+                .ifBlank { optString("brokerUrl") },
+            username = optString("username"),
+            password = optString("password"),
+            clientId = optString("clientId"),
+            topicPrefix = optString("topicPrefix")
+                .ifBlank { optString("baseTopic") }
+                .ifBlank { "intercom" },
+        )
     }
 
     private fun String.toSipTransport(): SipTransport {

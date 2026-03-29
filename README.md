@@ -9,6 +9,7 @@
 - URL встроенного браузера на главном экране
 - список плиток камер
 - список SIP-аккаунтов
+- параметры MQTT для публикации состояния звонка
 - параметры внешних провайдеров, например `proptech`
 
 ## Общая структура
@@ -18,6 +19,7 @@
   "webViewUrl": "http://192.168.1.10",
   "streams": [],
   "sipAccounts": [],
+  "mqtt": {},
   "providers": []
 }
 ```
@@ -84,7 +86,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
       "title": "Подъезд",
       "provider": {
         "type": "config",
-        "url": "rtsp://admin:password@192.168.1.20:554/stream1"
+        "url": "rtsp://admin:G7m2xQ9pL4@192.168.1.20:554/stream1"
       }
     }
   ]
@@ -112,7 +114,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
   "title": "Улица",
   "provider": {
     "type": "config",
-    "url": "rtsp://admin:password@192.168.1.21:554/stream1"
+    "url": "rtsp://admin:K8v1nR5sT2@192.168.1.21:554/stream1"
   }
 }
 ```
@@ -125,7 +127,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
   "title": "Лифт",
   "provider": {
     "type": "config",
-    "url": "rtsp://admin:password@192.168.1.22:554/stream1",
+    "url": "rtsp://admin:M4p7cZ2wH9@192.168.1.22:554/stream1",
     "previewUrl": "http://192.168.1.22/jpg/image.jpg",
     "previewReloadPeriod": 5000
   }
@@ -140,7 +142,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
   "title": "Склад",
   "provider": {
     "type": "config",
-    "url": "rtsp://admin:password@192.168.1.23:554/stream1",
+    "url": "rtsp://admin:Q6t8bN3yF1@192.168.1.23:554/stream1",
     "previewUrl": "https://camera.local/snapshot",
     "previewReloadPeriod": 15000,
     "previewExtras": {
@@ -157,7 +159,6 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 Поддерживаемые поля:
 
 - `type`: `"proptech"`
-- `url`: обязательный идентификатор или подсказка выбора камеры
 - `cameraId`: явный ID камеры
 
 Пример:
@@ -167,13 +168,12 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
   "id": "cam-4",
   "title": "Домофон",
   "provider": {
-    "type": "proptech",
-    "url": "Домофон"
+    "type": "proptech"
   }
 }
 ```
 
-`accessControlId` получается приложением через API провайдера. Для выбора нужного объекта приложение использует данные API и сопоставляет их по `provider.url`, `title`, `id` и `cameraId`.
+`accessControlId` получается приложением через API провайдера. Для выбора нужного объекта приложение использует данные API и сопоставляет их по `title`, `id` и `cameraId`.
 
 ## `sipAccounts`
 
@@ -231,7 +231,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
     "title": "Intercom",
     "displayName": "Intercom",
     "username": "2000",
-    "password": "password",
+    "password": "secret",
     "domain": "192.168.7.251",
     "port": 5060,
     "transport": "UDP"
@@ -267,6 +267,75 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 
 `accessControlId` получается через API провайдера. Для выбора нужной точки доступа приложение использует данные API и сопоставляет их по `title` или `id`.
 
+## `mqtt`
+
+Секция `mqtt` необязательная.
+
+Если она заполнена, приложение подключается к MQTT broker и публикует состояние звонка, номер звонящего и название провайдера SIP-аккаунта.
+
+Обязательные поля:
+
+- `serverUrl`
+- `clientId`
+
+Поддерживаемые поля:
+
+- `serverUrl`: адрес broker, например `tcp://192.168.1.10:1883`
+- `clientId`: используется как часть MQTT topic
+- `username`
+- `password`
+- `topicPrefix`: сейчас не используется для топиков звонка, но может остаться в конфиге без вреда
+
+Пример:
+
+```json
+{
+  "mqtt": {
+    "serverUrl": "tcp://192.168.1.10:1883",
+    "clientId": "panel-1",
+    "username": "mqtt-user",
+    "password": "secret"
+  }
+}
+```
+
+### Какие топики публикуются при подключении
+
+Для `clientId = "panel-1"` из секции `mqtt` приложение публикует:
+
+- `/devices/intercom-panel-1`
+- `/devices/intercom-panel-1/meta`
+- `/devices/intercom-panel-1/meta/driver`
+- `/devices/intercom-panel-1/meta/name`
+- `/devices/intercom-panel-1/controls/state/meta`
+- `/devices/intercom-panel-1/controls/state/meta/order`
+- `/devices/intercom-panel-1/controls/state/meta/readonly`
+- `/devices/intercom-panel-1/controls/state/meta/type`
+- `/devices/intercom-panel-1/controls/provider/meta`
+- `/devices/intercom-panel-1/controls/provider/meta/order`
+- `/devices/intercom-panel-1/controls/provider/meta/readonly`
+- `/devices/intercom-panel-1/controls/provider/meta/type`
+- `/devices/intercom-panel-1/controls/number/meta`
+- `/devices/intercom-panel-1/controls/number/meta/order`
+- `/devices/intercom-panel-1/controls/number/meta/readonly`
+- `/devices/intercom-panel-1/controls/number/meta/type`
+
+### Какие топики обновляются во время звонка
+
+- `/devices/intercom-panel-1/controls/state`
+- `/devices/intercom-panel-1/controls/provider`
+- `/devices/intercom-panel-1/controls/number`
+
+Значения `state`:
+
+- `1` = `Idle`
+- `2` = `Ringing`
+- `3` = `Connected`
+
+В `provider` публикуется `title` SIP-аккаунта, через который пришёл звонок.
+
+В `number` публикуется номер звонящего, извлечённый из SIP address.
+
 ## `providers`
 
 Секция `providers` содержит настройки внешних провайдеров.
@@ -292,7 +361,6 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 - `type`: `"proptech"`
 - `baseUrl`
 - `phone`
-- `installationId`
 
 Пример:
 
@@ -319,7 +387,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
       "title": "Подъезд",
       "provider": {
         "type": "config",
-        "url": "rtsp://admin:password@192.168.15.254:554/stream1"
+        "url": "rtsp://admin:J5d9wK2pRt6@192.168.15.254:554/stream1"
       }
     },
     {
@@ -327,7 +395,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
       "title": "Тамбур",
       "provider": {
         "type": "config",
-        "url": "rtsp://admin:password@192.168.7.29:554/stream1",
+        "url": "rtsp://admin:V3m8qX1nCb7@192.168.7.29:554/stream1",
         "previewUrl": "http://192.168.7.29/jpg/image.jpg",
         "previewReloadPeriod": 5000
       }
@@ -336,8 +404,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
       "id": "cam-3",
       "title": "Домофон",
       "provider": {
-        "type": "proptech",
-        "url": "Домофон"
+        "type": "proptech"
       }
     }
   ],
@@ -349,7 +416,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
         "title": "Intercom",
         "displayName": "Intercom",
         "username": "2000",
-        "password": "password",
+        "password": "secret",
         "domain": "192.168.7.251",
         "port": 5060,
         "transport": "UDP"
@@ -364,6 +431,12 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
       }
     }
   ],
+  "mqtt": {
+    "serverUrl": "tcp://192.168.1.10:1883",
+    "clientId": "panel-1",
+    "username": "mqtt-user",
+    "password": "secret"
+  },
   "providers": [
     {
       "type": "proptech",
@@ -377,12 +450,13 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 ## Правила заполнения
 
 - Если `provider.type = "config"`, данные берутся прямо из этого блока конфига.
-- У любого stream-провайдера поле `url` обязательно.
+- У stream-провайдера `type = "config"` поле `url` обязательно.
 - `previewUrl` можно не указывать.
 - Если `provider.type = "proptech"`, данные для плиток и SIP получаются от провайдера после авторизации.
 - Если у плитки есть `previewUrl`, в плитке показывается картинка, а в fullscreen всё равно запускается `RTSP`.
 - Если `previewUrl` нет, `RTSP` запускается сразу в плитке.
 - `previewReloadPeriod` задаётся в миллисекундах.
 - `transport` для SIP пишется строкой: `UDP`, `TCP` или `TLS`.
+- Для MQTT секции `mqtt.clientId` обязателен, без него MQTT не стартует.
 - Если в конфиге нет ни одного потребителя `proptech`, авторизация `proptech` не запускается.
 - Если файл конфига отсутствует или повреждён, приложение покажет экран с просьбой добавить корректный `app_config.json`.

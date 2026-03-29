@@ -131,6 +131,7 @@ dependencies {
     implementation("org.videolan.android:libvlc-all:3.6.5")
     implementation("org.mozilla.geckoview:geckoview:$geckoViewVersion")
     implementation("org.linphone:linphone-sdk-android:5.4.97")
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

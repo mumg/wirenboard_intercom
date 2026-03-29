@@ -22,25 +22,19 @@
   "users": [
     {
       "username": "1000",
-      "password": "tNQ2Uy2i",
+      "password": "secret",
       "display_name": "Entrance",
       "distributed": false
     },
     {
       "username": "1001",
-      "password": "tNQ2Uy2i",
+      "password": "secret",
       "display_name": "Vestibule",
       "distributed": false
     },
     {
       "username": "2000",
-      "password": "tNQ2Uy2i",
-      "display_name": "Intercom",
-      "distributed": true
-    },
-    {
-      "username": "2001",
-      "password": "tNQ2Uy2i",
+      "password": "secret",
       "display_name": "Intercom",
       "distributed": true
     }

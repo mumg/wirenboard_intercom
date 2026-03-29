@@ -17,7 +17,9 @@ import net.muratov.intercom.data.repository.AppConfigLoader
 import net.muratov.intercom.data.repository.SipAccountRepository
 import net.muratov.intercom.data.repository.StreamRepository
 import net.muratov.intercom.data.model.AppConfig
+import net.muratov.intercom.data.model.MqttConfig
 import net.muratov.intercom.data.model.ProviderOpenAction
+import net.muratov.intercom.mqtt.MqttCallStateService
 import net.muratov.intercom.provider.myhome.MyHomeProptechService
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
 import net.muratov.intercom.voip.SipCoreManager
@@ -37,6 +39,9 @@ class MainApplication : Application() {
     }
 
     fun reloadAppContainer() {
+        if (::appContainer.isInitialized) {
+            appContainer.dispose()
+        }
         val configResult = AppConfigLoader(this).load()
         val config = (configResult as? AppConfigLoadResult.Success)?.config ?: AppConfig()
         val isConfigValid = configResult is AppConfigLoadResult.Success
@@ -60,6 +65,20 @@ class MainApplication : Application() {
             ProptechStreamDataProvider(myHomeProviderService),
             ProptechSipAccountDataProvider(myHomeProviderService),
         )
+        val sipAccountRepository = SipAccountRepository(
+            sources = config.sipAccounts,
+            providers = providers,
+            myHomeProviderService = myHomeProviderService,
+        )
+        val mqttCallStateService = config.mqtt
+            .takeIf(MqttConfig::isConfigured)
+            ?.let { mqttConfig ->
+                MqttCallStateService(
+                    context = this,
+                    config = mqttConfig,
+                    sipAccountRepository = sipAccountRepository,
+                )
+            }
         appContainer = AppContainer(
             isConfigValid = isConfigValid,
             configFilePath = configFilePath,
@@ -70,14 +89,11 @@ class MainApplication : Application() {
                 providers = providers,
                 myHomeProviderService = myHomeProviderService,
             ),
-            sipAccountRepository = SipAccountRepository(
-                sources = config.sipAccounts,
-                providers = providers,
-                myHomeProviderService = myHomeProviderService,
-            ),
+            sipAccountRepository = sipAccountRepository,
             myHomeProviderService = myHomeProviderService,
             proptechWizardRequired = hasProptechConsumers,
             providers = providers,
+            mqttCallStateService = mqttCallStateService,
         )
     }
 }
@@ -92,6 +108,7 @@ data class AppContainer(
     val myHomeProviderService: MyHomeProviderService,
     val proptechWizardRequired: Boolean,
     private val providers: List<IntercomProvider>,
+    private val mqttCallStateService: MqttCallStateService? = null,
 ) {
     private val registrationStarted = AtomicBoolean(false)
     private val mainStarted = AtomicBoolean(false)
@@ -124,6 +141,7 @@ data class AppContainer(
         if (!isConfigValid) return
         if (mainStarted.compareAndSet(false, true)) {
             runCatching {
+                mqttCallStateService?.start()
                 scope.launch {
                     sipAccountRepository.accounts.collectLatest { accounts ->
                         Log.d("AppContainer", "Starting SIP with ${accounts.size} accounts")
@@ -144,6 +162,10 @@ data class AppContainer(
                 Log.e("AppContainer", "Failed to start SIP service", error)
             }
         }
+    }
+
+    fun dispose() {
+        mqttCallStateService?.stop()
     }
 
     suspend fun open(action: ProviderOpenAction): Boolean {

@@ -1,0 +1,62 @@
+#!/bin/sh
+set -e
+
+APP_NAME="sipserver"
+APP_USER="sipserver"
+APP_GROUP="sipserver"
+INSTALL_ROOT="/opt/sipserver"
+DATA_DIR="/var/lib/sipserver"
+LOG_DIR="/var/log/sipserver"
+CONFIG_DIR="/etc/sipserver"
+DEFAULTS_FILE="/etc/default/sipserver"
+SERVICE_NAME="${APP_NAME}.service"
+
+ensure_group() {
+  if ! getent group "$APP_GROUP" >/dev/null 2>&1; then
+    groupadd --system "$APP_GROUP"
+  fi
+}
+
+ensure_user() {
+  if ! id -u "$APP_USER" >/dev/null 2>&1; then
+    shell="/usr/sbin/nologin"
+    if [ ! -x "$shell" ]; then
+      shell="/sbin/nologin"
+    fi
+    useradd \
+      --system \
+      --gid "$APP_GROUP" \
+      --home-dir "$DATA_DIR" \
+      --create-home \
+      --shell "$shell" \
+      "$APP_USER"
+  fi
+}
+
+ensure_dirs() {
+  mkdir -p "$INSTALL_ROOT/bin" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
+  chown -R "$APP_USER:$APP_GROUP" "$INSTALL_ROOT" "$DATA_DIR" "$LOG_DIR"
+}
+
+enable_service() {
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
+    systemctl restart "$SERVICE_NAME" >/dev/null 2>&1 || systemctl start "$SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+}
+
+case "$1" in
+  configure)
+    ensure_group
+    ensure_user
+    ensure_dirs
+    if [ ! -f "$DEFAULTS_FILE" ]; then
+      touch "$DEFAULTS_FILE"
+      chmod 0644 "$DEFAULTS_FILE"
+    fi
+    enable_service
+    ;;
+esac
+
+exit 0

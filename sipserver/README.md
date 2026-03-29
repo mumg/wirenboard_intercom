@@ -38,6 +38,68 @@ env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS=linux GOARCH=arm GOARM=7 \
   go build -o ./bin/sipserver-linux-armv7 ./cmd/sipserver
 ```
 
+## Сборка под AMD64
+
+### Linux AMD64
+
+Для 64-бит x86:
+
+```bash
+make build-amd64
+```
+
+Или напрямую:
+
+```bash
+mkdir -p ./bin
+env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS=linux GOARCH=amd64 \
+  go build -o ./bin/sipserver-linux-amd64 ./cmd/sipserver
+```
+
+### DPKG пакет под ARM
+
+Сборка `.deb` для `linux/arm64`:
+
+```bash
+make dpkg-arm64
+```
+
+Сборка `.deb` для `linux/armv7` (`armhf`):
+
+```bash
+make dpkg-arm64 TARGET_ARCH=arm TARGET_GOARM=7
+```
+
+Готовый пакет складывается в `./dist`.
+
+После установки пакета:
+
+```bash
+sudo dpkg -i ./dist/sipserver_0.1.0_arm64.deb
+```
+
+пакет автоматически:
+
+- ставит бинарник в `/opt/sipserver/bin/sipserver`;
+- кладёт конфиг в `/etc/sipserver/sipserver.conf`;
+- ставит unit в `/lib/systemd/system/sipserver.service`;
+- создаёт пользователя `sipserver`;
+- включает и запускает сервис через `systemd`.
+
+### DPKG пакет под AMD64
+
+Сборка `.deb` для `linux/amd64`:
+
+```bash
+make dpkg-amd64
+```
+
+Готовый пакет также появится в `./dist`, например:
+
+```bash
+./dist/sipserver_0.1.0_amd64.deb
+```
+
 ### Сборка на macOS ARM
 
 Если нужно собрать бинарник именно для текущей машины Apple Silicon:

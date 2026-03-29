@@ -7,4 +7,5 @@ data class AppConfig(
     val streams: List<StreamSourceConfig> = emptyList(),
     val sipAccounts: List<SipAccountSourceConfig> = emptyList(),
     val myHomeProptech: MyHomeProptechConfig = MyHomeProptechConfig(),
+    val mqtt: MqttConfig = MqttConfig(),
 )

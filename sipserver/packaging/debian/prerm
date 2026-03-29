@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+SERVICE_NAME="sipserver.service"
+
+if [ "$1" = "remove" ] || [ "$1" = "upgrade" ] || [ "$1" = "deconfigure" ]; then
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+fi
+
+exit 0
