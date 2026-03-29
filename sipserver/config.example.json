@@ -1,7 +1,7 @@
 {
   "realm": "intercom.local",
   "distributed_extension": "hunt",
-  "registration_store": "./data/registrations.json",
+  "registration_store": "/var/lib/sipserver/registrations.json",
   "nonce_ttl_seconds": 300,
   "interfaces": [
     {

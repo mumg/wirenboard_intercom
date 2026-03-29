@@ -97,8 +97,21 @@ build_ar_deb() {
   )
 
   echo "2.0" > "$WORK_DIR/debian-binary"
-  tar -C "$CONTROL_DIR" -czf "$WORK_DIR/control.tar.gz" .
-  tar --exclude="./DEBIAN" -C "$PKG_ROOT" -czf "$WORK_DIR/data.tar.gz" .
+  COPYFILE_DISABLE=1 tar -czf "$WORK_DIR/control.tar.gz" \
+    --format ustar \
+    --uid 0 \
+    --gid 0 \
+    --uname root \
+    --gname root \
+    -C "$CONTROL_DIR" .
+  COPYFILE_DISABLE=1 tar -czf "$WORK_DIR/data.tar.gz" \
+    --format ustar \
+    --uid 0 \
+    --gid 0 \
+    --uname root \
+    --gname root \
+    --exclude="./DEBIAN" \
+    -C "$PKG_ROOT" .
 
   rm -f "$PACKAGE_FILE"
   ar -crS "$PACKAGE_FILE" "$WORK_DIR/debian-binary" "$WORK_DIR/control.tar.gz" "$WORK_DIR/data.tar.gz"

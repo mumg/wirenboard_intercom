@@ -82,6 +82,7 @@ sudo dpkg -i ./dist/sipserver_0.1.0_arm64.deb
 
 - ставит бинарник в `/opt/sipserver/bin/sipserver`;
 - кладёт конфиг в `/etc/sipserver/sipserver.conf`;
+- использует файл регистраций `/var/lib/sipserver/registrations.json`;
 - ставит unit в `/lib/systemd/system/sipserver.service`;
 - создаёт пользователя `sipserver`;
 - включает и запускает сервис через `systemd`.
@@ -149,6 +150,7 @@ sudo ./scripts/restart-systemd-service.sh
 
 - копирует бинарник в `/opt/sipserver/bin/sipserver`;
 - копирует `./config.example.json` в `/etc/sipserver/sipserver.conf`;
+- настраивает хранение регистраций в `/var/lib/sipserver/registrations.json`;
 - создаёт пользователя и группу `sipserver`, если их ещё нет;
 - создаёт каталоги `/var/lib/sipserver` и `/var/log/sipserver`;
 - устанавливает unit в `/etc/systemd/system/sipserver.service`;
@@ -166,4 +168,5 @@ sudo ./scripts/restart-systemd-service.sh
 
 Пример конфига лежит в `./config.example.json`.
 Для systemd-сервиса конфиг ставится в `/etc/sipserver/sipserver.conf`.
+Для установленного сервиса файл регистраций по умолчанию хранится в `/var/lib/sipserver/registrations.json`.
 Для локального запуска по умолчанию используется `./config.json`.

@@ -282,9 +282,11 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 
 - `serverUrl`: адрес broker, например `tcp://192.168.1.10:1883`
 - `clientId`: используется как часть MQTT topic
-- `username`
-- `password`
+- `username`: опционально
+- `password`: опционально
 - `topicPrefix`: сейчас не используется для топиков звонка, но может остаться в конфиге без вреда
+
+Если broker работает без авторизации, поля `username` и `password` можно не указывать.
 
 Пример:
 

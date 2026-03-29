@@ -5,9 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +19,7 @@ import (
 
 	"sipserver/internal/auth"
 	"sipserver/internal/config"
+	"sipserver/internal/logging"
 	"sipserver/internal/media"
 	"sipserver/internal/registrar"
 )
@@ -29,6 +30,7 @@ type Server struct {
 	ua       *sipgo.UserAgent
 	srv      *sipgo.Server
 	logger   *slog.Logger
+	logClose io.Closer
 	bindings map[string]*binding
 	users    map[string]config.UserConfig
 
@@ -95,9 +97,7 @@ type callBranch struct {
 }
 
 func New(cfg *config.Config) (*Server, error) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	logger, logClose := logging.New("sipserver")
 	sip.SetDefaultLogger(logger)
 	sip.SIPDebug = true
 
@@ -131,6 +131,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ua:             ua,
 		srv:            srv,
 		logger:         logger,
+		logClose:       logClose,
 		bindings:       make(map[string]*binding, len(cfg.Interfaces)),
 		users:          make(map[string]config.UserConfig, len(cfg.Users)),
 		auth:           auth.NewManager(cfg.Realm, time.Duration(cfg.NonceTTLSeconds)*time.Second),
@@ -187,6 +188,12 @@ func New(cfg *config.Config) (*Server, error) {
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	defer func() {
+		if s.logClose != nil {
+			_ = s.logClose.Close()
+		}
+	}()
+
 	errCh := make(chan error, len(s.bindings))
 	var wg sync.WaitGroup
 

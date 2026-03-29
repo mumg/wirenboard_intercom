@@ -122,8 +122,12 @@ class MqttCallStateService(
                 isCleanSession = true
                 connectionTimeout = 10
                 keepAliveInterval = 30
-                userName = config.username.takeIf { it.isNotBlank() }
-                password = config.password.takeIf { it.isNotBlank() }?.toCharArray()
+                if (config.username.isNotBlank()) {
+                    userName = config.username
+                }
+                if (config.password.isNotBlank()) {
+                    password = config.password.toCharArray()
+                }
             }
             mqttClient.connect(options).waitForCompletion()
             publishDeviceMeta(mqttClient)
@@ -170,11 +174,11 @@ class MqttCallStateService(
             topic("meta"),
             JSONObject()
                 .put("driver", "intercom")
-                .put("title", JSONObject().put("en", resolvedClientId))
+                .put("title", JSONObject().put("en", "Intercom $resolvedClientId"))
                 .toString(),
         )
         publish(client, topic("meta/driver"), "intercom")
-        publish(client, topic("meta/name"), resolvedClientId)
+        publish(client, topic("meta/name"), "Intercom $resolvedClientId")
 
         publish(
             client,
