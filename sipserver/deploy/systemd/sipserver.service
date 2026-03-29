@@ -1,0 +1,22 @@
+[Unit]
+Description=SIP Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sipserver
+Group=sipserver
+WorkingDirectory=/var/lib/sipserver
+EnvironmentFile=-/etc/default/sipserver
+ExecStart=/opt/sipserver/bin/sipserver -config /etc/sipserver/sipserver.conf $SIPSERVER_OPTS
+Restart=always
+RestartSec=2
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+LimitNOFILE=65536
+StandardOutput=append:/var/log/sipserver/sipserver.log
+StandardError=append:/var/log/sipserver/sipserver.log
+
+[Install]
+WantedBy=multi-user.target

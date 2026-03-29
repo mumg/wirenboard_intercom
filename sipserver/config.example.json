@@ -1,0 +1,53 @@
+{
+  "realm": "intercom.local",
+  "distributed_extension": "hunt",
+  "registration_store": "./data/registrations.json",
+  "nonce_ttl_seconds": 300,
+  "interfaces": [
+    {
+      "name": "lan-a",
+      "sip_listen": "192.168.10.1:5060",
+      "advertise_ip": "192.168.10.1",
+      "media_ip": "192.168.10.1",
+      "subnet": "192.168.10.0/24"
+    },
+    {
+      "name": "lan-b",
+      "sip_listen": "192.168.20.1:5060",
+      "advertise_ip": "192.168.20.1",
+      "media_ip": "192.168.20.1",
+      "subnet": "192.168.20.0/24"
+    }
+  ],
+  "users": [
+    {
+      "username": "1000",
+      "password": "tNQ2Uy2i",
+      "display_name": "Entrance",
+      "distributed": false
+    },
+    {
+      "username": "1001",
+      "password": "tNQ2Uy2i",
+      "display_name": "Vestibule",
+      "distributed": false
+    },
+    {
+      "username": "2000",
+      "password": "tNQ2Uy2i",
+      "display_name": "Intercom",
+      "distributed": true
+    },
+    {
+      "username": "2001",
+      "password": "tNQ2Uy2i",
+      "display_name": "Intercom",
+      "distributed": true
+    }
+  ],
+  "media": {
+    "rtp_port_start": 20000,
+    "rtp_port_end": 20100,
+    "read_buffer": 2048
+  }
+}
