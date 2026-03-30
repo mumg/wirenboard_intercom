@@ -21,6 +21,7 @@ class ConfigSipAccountDataProvider : IntercomProvider {
             port = provider.port,
             transport = provider.transport,
             displayName = provider.displayName.ifBlank { title },
+            ringtoneAsset = provider.ringtoneAsset,
         )
     }
 }

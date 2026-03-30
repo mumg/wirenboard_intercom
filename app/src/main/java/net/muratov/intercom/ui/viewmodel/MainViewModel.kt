@@ -3,6 +3,7 @@ package net.muratov.intercom.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,8 @@ import net.muratov.intercom.provider.myhome.MyHomeContextSelectionPrompt
 import net.muratov.intercom.provider.myhome.MyHomeLoginContext
 import net.muratov.intercom.provider.myhome.MyHomeProviderState
 import net.muratov.intercom.provider.myhome.MyHomeVerificationPrompt
+import net.muratov.intercom.voip.CallSnapshot
+import net.muratov.intercom.voip.SipCoreManager
 
 data class MainUiState(
     val isConfigValid: Boolean = true,
@@ -32,16 +35,29 @@ data class MainUiState(
     val verificationPrompt: MyHomeVerificationPrompt? = null,
     val proptechWizardRequired: Boolean = false,
     val canEnterMainUi: Boolean = true,
+    val stopTileVideoPlayback: Boolean = false,
 )
 
 class MainViewModel(
     private val container: AppContainer,
 ) : ViewModel() {
+    private val stopTileVideoPlayback = MutableStateFlow(isIncomingCallActive(SipCoreManager.getCurrentCallSnapshot()))
+
+    private val sipListener = object : SipCoreManager.Listener {
+        override fun onCallChanged(snapshot: CallSnapshot?) {
+            stopTileVideoPlayback.value = isIncomingCallActive(snapshot)
+        }
+    }
+
+    init {
+        SipCoreManager.addListener(sipListener)
+    }
 
     val uiState: StateFlow<MainUiState> = combine(
         container.streamRepository.streams,
         container.myHomeProviderService.state,
-    ) { streams, providerState ->
+        stopTileVideoPlayback,
+    ) { streams, providerState, shouldStopTileVideoPlayback ->
         MainUiState(
             isConfigValid = container.isConfigValid,
             configFilePath = container.configFilePath,
@@ -52,6 +68,7 @@ class MainViewModel(
             verificationPrompt = providerState.verificationPrompt,
             proptechWizardRequired = container.proptechWizardRequired,
             canEnterMainUi = !container.proptechWizardRequired || providerState.status == MyHomeAuthStatus.Authorized,
+            stopTileVideoPlayback = shouldStopTileVideoPlayback,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -96,6 +113,22 @@ class MainViewModel(
 
     suspend fun resolveFullscreenStream(streamId: String): RtspStream? {
         return container.streamRepository.resolveStream(streamId)
+    }
+
+    override fun onCleared() {
+        SipCoreManager.removeListener(sipListener)
+        super.onCleared()
+    }
+
+    private fun isIncomingCallActive(snapshot: CallSnapshot?): Boolean {
+        if (snapshot == null || !snapshot.isIncoming) return false
+        return when (snapshot.state) {
+            org.linphone.core.Call.State.End,
+            org.linphone.core.Call.State.Error,
+            org.linphone.core.Call.State.Released -> false
+
+            else -> true
+        }
     }
 }
 

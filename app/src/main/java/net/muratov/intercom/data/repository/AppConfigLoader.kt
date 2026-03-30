@@ -139,6 +139,7 @@ class AppConfigLoader(
             domain = optString("domain"),
             port = optInt("port", 5060),
             transport = optString("transport").toSipTransport(),
+            ringtoneAsset = optString("ringtoneAsset").takeIf { it.isNotBlank() },
         )
     }
 

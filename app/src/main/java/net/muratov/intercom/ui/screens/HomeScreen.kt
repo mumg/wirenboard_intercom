@@ -55,6 +55,7 @@ fun HomeScreen(
     webViewUrl: String,
     streams: List<RtspStream>,
     browserVisible: Boolean,
+    stopTileVideoPlayback: Boolean,
     onStreamSelected: (RtspStream) -> Unit,
 ) {
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
@@ -68,6 +69,8 @@ fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.End))
             .background(
                 brush = Brush.linearGradient(
                     colors = listOf(Color(0xFF0A1220), Color(0xFF132A3B), Color(0xFF102D25)),
@@ -86,7 +89,6 @@ fun HomeScreen(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.End))
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -100,6 +102,7 @@ fun HomeScreen(
                 StreamsColumn(
                     streams = streams,
                     width = tileColumnWidth,
+                    stopTileVideoPlayback = stopTileVideoPlayback,
                     onStreamSelected = onStreamSelected,
                 )
             }
@@ -263,6 +266,7 @@ private fun String.toBrowserUrl(): String {
 private fun StreamsColumn(
     streams: List<RtspStream>,
     width: Dp,
+    stopTileVideoPlayback: Boolean,
     onStreamSelected: (RtspStream) -> Unit,
 ) {
     BoxWithConstraints(
@@ -283,6 +287,7 @@ private fun StreamsColumn(
                 StreamTile(
                     stream = stream,
                     tileHeight = tileHeight,
+                    stopTileVideoPlayback = stopTileVideoPlayback,
                     onClick = { onStreamSelected(stream) },
                 )
             }
@@ -294,6 +299,7 @@ private fun StreamsColumn(
 private fun StreamTile(
     stream: RtspStream,
     tileHeight: Dp,
+    stopTileVideoPlayback: Boolean,
     onClick: () -> Unit,
 ) {
     Card(
@@ -321,13 +327,21 @@ private fun StreamTile(
                     }
 
                     else -> {
-                        RtspPlayer(
-                            url = stream.rtspUrl,
-                            playbackEngine = stream.playbackEngine,
-                            headers = stream.rtspExtras,
-                            muted = true,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        if (!stopTileVideoPlayback) {
+                            RtspPlayer(
+                                url = stream.rtspUrl,
+                                playbackEngine = stream.playbackEngine,
+                                headers = stream.rtspExtras,
+                                muted = true,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF0B1018)),
+                            )
+                        }
                     }
                 }
                 Box(

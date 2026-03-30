@@ -35,6 +35,7 @@ class ProptechSipAccountDataProvider(
             port = source.provider.port,
             transport = source.provider.transport.takeIf { it != SipTransport.UDP } ?: SipTransport.UDP,
             displayName = source.provider.displayName.ifBlank { title },
+            ringtoneAsset = source.provider.ringtoneAsset,
             openAction = ProviderOpenAction(
                 providerType = type,
                 targetId = accessControl.id.toString(),

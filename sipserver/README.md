@@ -67,7 +67,7 @@ make dpkg-arm64
 Сборка `.deb` для `linux/armv7` (`armhf`):
 
 ```bash
-make dpkg-arm64 TARGET_ARCH=arm TARGET_GOARM=7
+make dpkg-armhf
 ```
 
 Готовый пакет складывается в `./dist`.
@@ -86,6 +86,12 @@ sudo dpkg -i ./dist/sipserver_0.1.0_arm64.deb
 - ставит unit в `/lib/systemd/system/sipserver.service`;
 - создаёт пользователя `sipserver`;
 - включает и запускает сервис через `systemd`.
+
+Готовый `armhf`-пакет появится в `./dist`, например:
+
+```bash
+./dist/sipserver_0.1.0_armhf.deb
+```
 
 ### DPKG пакет под AMD64
 

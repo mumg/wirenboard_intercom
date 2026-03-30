@@ -12,7 +12,7 @@ TARGET_ARCH ?= arm64
 TARGET_GOARM ?= 7
 OUT_DIR ?= ./dist
 
-.PHONY: build build-amd64 run vet clean install uninstall restart dpkg-arm64 dpkg-amd64
+.PHONY: build build-amd64 run vet clean install uninstall restart dpkg-arm64 dpkg-armhf dpkg-amd64
 
 build:
 	mkdir -p $(BIN_DIR)
@@ -43,6 +43,10 @@ restart:
 dpkg-arm64:
 	chmod +x ./scripts/build-dpkg.sh
 	VERSION=$(VERSION) TARGET_OS=$(TARGET_OS) TARGET_ARCH=$(TARGET_ARCH) TARGET_GOARM=$(TARGET_GOARM) OUT_DIR=$(OUT_DIR) ./scripts/build-dpkg.sh
+
+dpkg-armhf:
+	chmod +x ./scripts/build-dpkg.sh
+	VERSION=$(VERSION) TARGET_OS=linux TARGET_ARCH=arm TARGET_GOARM=7 OUT_DIR=$(OUT_DIR) ./scripts/build-dpkg.sh
 
 dpkg-amd64:
 	chmod +x ./scripts/build-dpkg.sh

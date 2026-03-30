@@ -64,7 +64,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:contentDescription="Reject"
-            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:src="@drawable/ic_call_end_24"
             app:backgroundTint="#C73A3A"
             app:tint="@android:color/white" />
     </LinearLayout>

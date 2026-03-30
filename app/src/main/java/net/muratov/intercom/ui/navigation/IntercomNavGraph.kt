@@ -23,6 +23,7 @@ fun IntercomNavGraph(
     webViewUrl: String,
     streams: List<RtspStream>,
     browserVisible: Boolean,
+    stopTileVideoPlayback: Boolean,
     onStreamSelected: (RtspStream) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -36,6 +37,7 @@ fun IntercomNavGraph(
                 webViewUrl = webViewUrl,
                 streams = streams,
                 browserVisible = browserVisible,
+                stopTileVideoPlayback = stopTileVideoPlayback,
                 onStreamSelected = onStreamSelected,
             )
         }

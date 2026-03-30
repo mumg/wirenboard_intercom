@@ -1,26 +1,32 @@
 package net.muratov.intercom.voip
 
 import android.Manifest
+import android.content.Context
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.media.MediaPlayer
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import org.linphone.core.Call
 import kotlinx.coroutines.launch
 import net.muratov.intercom.databinding.ActivityIncomingCallBinding
+import java.io.File
 class IncomingCallActivity : AppCompatActivity() {
     private lateinit var binding: ActivityIncomingCallBinding
 
     private var microphoneGranted = false
     private var cameraGranted = false
-    private var ringtone: Ringtone? = null
-    private var ringtoneAccountId: String? = null
+    private var incomingCallSound: IncomingCallSound? = null
+    private var incomingCallSoundAccountId: String? = null
 
     private val appContainer: net.muratov.intercom.AppContainer
         get() = (application as net.muratov.intercom.MainApplication).appContainer
@@ -45,6 +51,7 @@ class IncomingCallActivity : AppCompatActivity() {
         setTurnScreenOn(true)
         binding = ActivityIncomingCallBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applyWindowInsets()
 
         setupListeners()
         updateGrantedPermissions()
@@ -63,30 +70,31 @@ class IncomingCallActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        ringtone?.stopSafely()
+        incomingCallSound?.stop()
         SipCoreManager.attachVideoWindows(null, null)
         super.onPause()
     }
 
     override fun onStop() {
-        ringtone?.stopSafely()
+        incomingCallSound?.stop()
         SipCoreManager.removeListener(coreListener)
         super.onStop()
     }
 
     override fun onDestroy() {
-        ringtone?.stopSafely()
+        incomingCallSound?.release()
+        incomingCallSound = null
         super.onDestroy()
     }
 
     private fun setupListeners() {
         binding.answerButton.setOnClickListener {
-            ringtone?.stopSafely()
+            incomingCallSound?.stop()
             SipCoreManager.answerIncomingCall()
         }
 
         binding.hangupButton.setOnClickListener {
-            ringtone?.stopSafely()
+            incomingCallSound?.stop()
             SipCoreManager.terminateCurrentCall()
         }
 
@@ -104,12 +112,12 @@ class IncomingCallActivity : AppCompatActivity() {
 
     private fun renderCall(snapshot: CallSnapshot?) {
         if (snapshot == null) {
-            ringtone?.stopSafely()
+            incomingCallSound?.stop()
             finish()
             return
         }
 
-        ensureRingtoneForCurrentAccount()
+        ensureIncomingCallSoundForCurrentAccount()
 
         val incomingPending = snapshot.state == Call.State.IncomingReceived ||
                 snapshot.state == Call.State.IncomingEarlyMedia
@@ -118,7 +126,7 @@ class IncomingCallActivity : AppCompatActivity() {
                 snapshot.state != Call.State.Released
 
         if (activeCall && !incomingPending) {
-            ringtone?.stopSafely()
+            incomingCallSound?.stop()
             binding.answerButton.visibility = View.GONE
             binding.hangupButton.visibility = View.VISIBLE
             val accountId = SipCoreManager.getCurrentCallAccountId()
@@ -133,9 +141,9 @@ class IncomingCallActivity : AppCompatActivity() {
         binding.answerButton.visibility = if (incomingPending) View.VISIBLE else View.GONE
         binding.hangupButton.visibility = if (activeCall) View.VISIBLE else View.GONE
         if (incomingPending) {
-            ringtone?.playLooping()
+            incomingCallSound?.playLooping()
         } else {
-            ringtone?.stopSafely()
+            incomingCallSound?.stop()
         }
         val accountId = SipCoreManager.getCurrentCallAccountId()
         val openAction = accountId?.let { id ->
@@ -144,7 +152,7 @@ class IncomingCallActivity : AppCompatActivity() {
         binding.openButton.visibility = if (openAction != null) View.VISIBLE else View.GONE
 
         if (!activeCall) {
-            ringtone?.stopSafely()
+            incomingCallSound?.stop()
             finish()
             return
         }
@@ -156,17 +164,36 @@ class IncomingCallActivity : AppCompatActivity() {
         SipCoreManager.attachVideoWindows(binding.remoteVideoSurface, null)
     }
 
-    private fun ensureRingtoneForCurrentAccount() {
-        val accountId = SipCoreManager.getCurrentCallAccountId()
-        if (ringtone != null && ringtoneAccountId == accountId) {
-            return
+    private fun applyWindowInsets() {
+        val layoutParams = binding.callActionsBar.layoutParams as ViewGroup.MarginLayoutParams
+        val baseBottomMargin = layoutParams.bottomMargin
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val navigationBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            layoutParams.bottomMargin = baseBottomMargin + navigationBarInsets.bottom
+            binding.callActionsBar.layoutParams = layoutParams
+            insets
         }
-        ringtone?.stopSafely()
-        ringtoneAccountId = accountId
-        ringtone = resolveRingtoneForAccount(accountId)
     }
 
-    private fun resolveRingtoneForAccount(accountId: String?): Ringtone? {
+    private fun ensureIncomingCallSoundForCurrentAccount() {
+        val accountId = SipCoreManager.getCurrentCallAccountId()
+        if (incomingCallSound != null && incomingCallSoundAccountId == accountId) {
+            return
+        }
+        incomingCallSound?.release()
+        incomingCallSoundAccountId = accountId
+        incomingCallSound = resolveIncomingCallSoundForAccount(accountId)
+    }
+
+    private fun resolveIncomingCallSoundForAccount(accountId: String?): IncomingCallSound? {
+        val ringtoneAsset = accountId?.let { id ->
+            appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == id }?.ringtoneAsset
+        }
+        val assetSound = ringtoneAsset?.let(::createAssetSound)
+        if (assetSound != null) {
+            return assetSound
+        }
+
         val ringtoneUris = runCatching {
             val manager = RingtoneManager(this).apply {
                 setType(RingtoneManager.TYPE_RINGTONE)
@@ -189,8 +216,49 @@ class IncomingCallActivity : AppCompatActivity() {
         }
 
         return selectedUri?.let { uri ->
-            runCatching { RingtoneManager.getRingtone(applicationContext, uri) }.getOrNull()
+            runCatching { RingtoneManager.getRingtone(applicationContext, uri) }
+                .getOrNull()
+                ?.let(::RingtoneIncomingCallSound)
         }
+    }
+
+    private fun createAssetSound(assetPath: String): IncomingCallSound? {
+        val assetSound = runCatching {
+            val assetFileDescriptor = applicationContext.assets.openFd(assetPath)
+            val mediaPlayer = MediaPlayer().apply {
+                setDataSource(
+                    assetFileDescriptor.fileDescriptor,
+                    assetFileDescriptor.startOffset,
+                    assetFileDescriptor.length,
+                )
+                isLooping = true
+                prepare()
+            }
+            assetFileDescriptor.close()
+            MediaPlayerIncomingCallSound(mediaPlayer)
+        }.getOrNull()
+        if (assetSound != null) {
+            return assetSound
+        }
+
+        val configDirectory = appContainer.configFilePath
+            .takeIf { it.isNotBlank() }
+            ?.let(::File)
+            ?.parentFile
+            ?: return null
+        val candidateFile = File(configDirectory, assetPath)
+        if (!candidateFile.isFile) {
+            return null
+        }
+
+        return runCatching {
+            val mediaPlayer = MediaPlayer().apply {
+                setDataSource(candidateFile.absolutePath)
+                isLooping = true
+                prepare()
+            }
+            MediaPlayerIncomingCallSound(mediaPlayer)
+        }.getOrNull()
     }
 
     private fun requestPermissionsIfNeeded() {
@@ -221,17 +289,63 @@ class IncomingCallActivity : AppCompatActivity() {
     }
 }
 
-private fun Ringtone.playLooping() {
-    runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            isLooping = true
+private interface IncomingCallSound {
+    fun playLooping()
+
+    fun stop()
+
+    fun release()
+}
+
+private class RingtoneIncomingCallSound(
+    private val ringtone: Ringtone,
+) : IncomingCallSound {
+    override fun playLooping() {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                ringtone.isLooping = true
+            }
+            if (!ringtone.isPlaying) {
+                ringtone.play()
+            }
         }
-        if (!isPlaying) {
-            play()
-        }
+    }
+
+    override fun stop() {
+        runCatching { ringtone.stop() }
+    }
+
+    override fun release() {
+        stop()
     }
 }
 
-private fun Ringtone.stopSafely() {
-    runCatching { stop() }
+private class MediaPlayerIncomingCallSound(
+    private val mediaPlayer: MediaPlayer,
+) : IncomingCallSound {
+    override fun playLooping() {
+        runCatching {
+            if (!mediaPlayer.isPlaying) {
+                mediaPlayer.start()
+            }
+        }
+    }
+
+    override fun stop() {
+        runCatching {
+            if (mediaPlayer.isPlaying) {
+                mediaPlayer.pause()
+            }
+            mediaPlayer.seekTo(0)
+        }
+    }
+
+    override fun release() {
+        runCatching {
+            mediaPlayer.stop()
+        }
+        runCatching {
+            mediaPlayer.release()
+        }
+    }
 }

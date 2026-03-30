@@ -174,6 +174,7 @@ private fun IntercomApp(
                 webViewUrl = appContainer.webViewUrl,
                 streams = uiState.streams,
                 browserVisible = selectedStreamId == null,
+                stopTileVideoPlayback = uiState.stopTileVideoPlayback,
                 onStreamSelected = { stream -> selectedStreamId = stream.id },
                 modifier = Modifier.fillMaxSize(),
             )
