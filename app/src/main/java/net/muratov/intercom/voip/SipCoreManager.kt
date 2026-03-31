@@ -11,6 +11,7 @@ import org.linphone.core.Core
 import org.linphone.core.CoreListenerStub
 import org.linphone.core.Factory
 import org.linphone.core.GlobalState
+import org.linphone.core.LogLevel
 import org.linphone.core.LogCollectionState
 import org.linphone.core.MediaDirection
 import org.linphone.core.Reason
@@ -24,7 +25,10 @@ data class SipCredentials(
     val password: String,
     val domain: String,
     val server: String,
+    val port: Int,
     val transport: TransportType,
+    val stunServer: String,
+    val iceEnabled: Boolean,
     val id: String
 )
 
@@ -167,7 +171,17 @@ object SipCoreManager {
         Factory.instance().setCacheDir(appContext.cacheDir.absolutePath)
         Factory.instance().setLogCollectionPath(appContext.filesDir.absolutePath)
         Factory.instance().enableLogCollection(LogCollectionState.Enabled)
+        Factory.instance().setLoggerDomain("IntercomLinphone")
         Factory.instance().enableLogcatLogs(true)
+        Factory.instance().getLoggingService().setDomain("IntercomLinphone")
+        Factory.instance().getLoggingService().setLogLevelMask(
+            LogLevel.Debug.toInt() or
+                LogLevel.Trace.toInt() or
+                LogLevel.Message.toInt() or
+                LogLevel.Warning.toInt() or
+                LogLevel.Error.toInt() or
+                LogLevel.Fatal.toInt()
+        )
 
         copyAsset("linphonerc_default", File(appContext.filesDir, "simple_linphonerc_default"))
         copyAsset("linphonerc_factory", File(appContext.filesDir, "simple_linphonerc_factory"))
@@ -298,6 +312,7 @@ object SipCoreManager {
             return
         }
         serverAddress.transport = credentials.transport
+        serverAddress.setPort(credentials.port)
 
         val authInfo = Factory.instance().createAuthInfo(
             credentials.username,
@@ -313,10 +328,18 @@ object SipCoreManager {
         accountParams.isRegisterEnabled = true
         accountParams.pushNotificationAllowed = false
         accountParams.idkey = credentials.id
+        accountParams.natPolicy = createNatPolicy(credentials)
 
         val account = core.createAccount(accountParams)
         core.addAuthInfo(authInfo)
         core.addAccount(account)
+    }
+
+    private fun createNatPolicy(credentials: SipCredentials) = core.createNatPolicy().apply {
+        setIceEnabled(credentials.iceEnabled)
+        val stunServer = credentials.stunServer.trim()
+        setStunEnabled(stunServer.isNotEmpty())
+        setStunServer(stunServer.ifEmpty { null })
     }
 
 

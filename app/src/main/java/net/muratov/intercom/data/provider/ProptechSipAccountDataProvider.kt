@@ -35,6 +35,8 @@ class ProptechSipAccountDataProvider(
             port = source.provider.port,
             transport = source.provider.transport.takeIf { it != SipTransport.UDP } ?: SipTransport.UDP,
             displayName = source.provider.displayName.ifBlank { title },
+            stunServer = PROPTECH_STUN_SERVER,
+            iceEnabled = PROPTECH_ICE_ENABLED,
             ringtoneAsset = source.provider.ringtoneAsset,
             openAction = ProviderOpenAction(
                 providerType = type,
@@ -60,5 +62,10 @@ class ProptechSipAccountDataProvider(
         } ?: accessControls.firstOrNull { control ->
             control.id.toString() == source.id
         } ?: accessControls.firstOrNull()
+    }
+
+    private companion object {
+        private const val PROPTECH_STUN_SERVER = "stun.sipnet.ru:3478"
+        private const val PROPTECH_ICE_ENABLED = true
     }
 }

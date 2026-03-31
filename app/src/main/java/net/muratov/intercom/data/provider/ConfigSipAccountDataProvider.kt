@@ -21,6 +21,8 @@ class ConfigSipAccountDataProvider : IntercomProvider {
             port = provider.port,
             transport = provider.transport,
             displayName = provider.displayName.ifBlank { title },
+            stunServer = provider.stunServer,
+            iceEnabled = provider.iceEnabled,
             ringtoneAsset = provider.ringtoneAsset,
         )
     }

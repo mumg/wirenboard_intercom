@@ -30,5 +30,7 @@ data class SipAccountProviderConfig(
     val domain: String = "",
     val port: Int = 5060,
     val transport: SipTransport = SipTransport.UDP,
+    val stunServer: String = "",
+    val iceEnabled: Boolean = false,
     val ringtoneAsset: String? = null,
 )

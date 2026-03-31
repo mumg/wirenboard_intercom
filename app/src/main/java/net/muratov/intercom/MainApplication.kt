@@ -19,6 +19,7 @@ import net.muratov.intercom.data.repository.StreamRepository
 import net.muratov.intercom.data.model.AppConfig
 import net.muratov.intercom.data.model.MqttConfig
 import net.muratov.intercom.data.model.ProviderOpenAction
+import net.muratov.intercom.data.model.SipTransport
 import net.muratov.intercom.mqtt.MqttCallStateService
 import net.muratov.intercom.provider.myhome.MyHomeProptechService
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
@@ -147,12 +148,15 @@ data class AppContainer(
                         Log.d("AppContainer", "Starting SIP with ${accounts.size} accounts")
                         accounts.forEach {
                             SipCoreManager.register(SipCredentials(
-                                it.username,
-                                it.password,
-                                it.domain,
-                                it.domain,
-                                TransportType.Udp,
-                                it.id
+                                username = it.username,
+                                password = it.password,
+                                domain = it.domain,
+                                server = it.domain,
+                                port = it.port,
+                                transport = it.transport.toLinphoneTransportType(),
+                                stunServer = it.stunServer,
+                                iceEnabled = it.iceEnabled,
+                                id = it.id,
                             ))
                         }
                     }
@@ -174,5 +178,13 @@ data class AppContainer(
             if (provider.open(action)) return true
         }
         return false
+    }
+
+    private fun SipTransport.toLinphoneTransportType(): TransportType {
+        return when (this) {
+            SipTransport.TCP -> TransportType.Tcp
+            SipTransport.TLS -> TransportType.Tls
+            SipTransport.UDP -> TransportType.Udp
+        }
     }
 }

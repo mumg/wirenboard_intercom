@@ -199,7 +199,9 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
         "password": "secret",
         "domain": "192.168.1.30",
         "port": 5060,
-        "transport": "UDP"
+        "transport": "UDP",
+        "stunServer": "stun.l.google.com:19302",
+        "iceEnabled": true
       }
     }
   ]
@@ -220,6 +222,8 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 - `domain`
 - `port`
 - `transport`: `UDP`, `TCP` или `TLS`
+- `stunServer`: STUN-сервер для этого аккаунта
+- `iceEnabled`: включает ICE для этого аккаунта
 
 Пример:
 
@@ -234,7 +238,9 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
     "password": "secret",
     "domain": "192.168.7.251",
     "port": 5060,
-    "transport": "UDP"
+    "transport": "UDP",
+    "stunServer": "stun.l.google.com:19302",
+    "iceEnabled": true
   }
 }
 ```
@@ -266,6 +272,8 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 ```
 
 `accessControlId` получается через API провайдера. Для выбора нужной точки доступа приложение использует данные API и сопоставляет их по `title` или `id`.
+
+Для `proptech` параметры `STUN/ICE` задаются в коде приложения константами и не читаются из `app_config.json`.
 
 ## `mqtt`
 
@@ -421,7 +429,9 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
         "password": "secret",
         "domain": "192.168.7.251",
         "port": 5060,
-        "transport": "UDP"
+        "transport": "UDP",
+        "stunServer": "stun.l.google.com:19302",
+        "iceEnabled": true
       }
     },
     {
@@ -459,6 +469,9 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 - Если `previewUrl` нет, `RTSP` запускается сразу в плитке.
 - `previewReloadPeriod` задаётся в миллисекундах.
 - `transport` для SIP пишется строкой: `UDP`, `TCP` или `TLS`.
+- `stunServer` для SIP-аккаунта указывается строкой, например `stun.l.google.com:19302`.
+- `iceEnabled` для SIP-аккаунта указывается как `true` или `false`.
+- Для `proptech` значения `STUN/ICE` берутся из констант приложения, а не из конфига.
 - Для MQTT секции `mqtt.clientId` обязателен, без него MQTT не стартует.
 - Если в конфиге нет ни одного потребителя `proptech`, авторизация `proptech` не запускается.
 - Если файл конфига отсутствует или повреждён, приложение покажет экран с просьбой добавить корректный `app_config.json`.

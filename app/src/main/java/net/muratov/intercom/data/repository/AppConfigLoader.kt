@@ -139,6 +139,8 @@ class AppConfigLoader(
             domain = optString("domain"),
             port = optInt("port", 5060),
             transport = optString("transport").toSipTransport(),
+            stunServer = optString("stunServer"),
+            iceEnabled = optBoolean("iceEnabled", false),
             ringtoneAsset = optString("ringtoneAsset").takeIf { it.isNotBlank() },
         )
     }
