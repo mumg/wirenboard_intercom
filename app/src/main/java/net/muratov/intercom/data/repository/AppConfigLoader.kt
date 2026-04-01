@@ -140,7 +140,7 @@ class AppConfigLoader(
             port = optInt("port", 5060),
             transport = optString("transport").toSipTransport(),
             stunServer = optString("stunServer"),
-            iceEnabled = optBoolean("iceEnabled", false),
+            iceEnabled = if (has("iceEnabled")) optBoolean("iceEnabled") else null,
             ringtoneAsset = optString("ringtoneAsset").takeIf { it.isNotBlank() },
         )
     }

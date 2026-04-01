@@ -26,6 +26,9 @@ data class SipAccountConfig(
     val stunServer: String = "",
     val iceEnabled: Boolean = false,
     val ringtoneAsset: String? = null,
+    val incomingPreviewRtspUrl: String? = null,
+    val incomingPreviewHeaders: Map<String, String> = emptyMap(),
+    val incomingPreviewPlaybackEngine: StreamPlaybackEngine = StreamPlaybackEngine.EXO_PLAYER,
     val openAction: ProviderOpenAction? = null,
 )
 

@@ -7,8 +7,9 @@
 /.DS_Store
 app/build/
 app/release
-app_config.json
+app_config_entrance.json
 /tools/
 /sipserver/config.json
 /sipserver/.idea/
 /sipserver/bin/sipserver
+/app_config_bedroom.json

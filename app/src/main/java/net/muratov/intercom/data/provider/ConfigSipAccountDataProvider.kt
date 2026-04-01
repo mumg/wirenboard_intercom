@@ -22,7 +22,7 @@ class ConfigSipAccountDataProvider : IntercomProvider {
             transport = provider.transport,
             displayName = provider.displayName.ifBlank { title },
             stunServer = provider.stunServer,
-            iceEnabled = provider.iceEnabled,
+            iceEnabled = provider.iceEnabled ?: false,
             ringtoneAsset = provider.ringtoneAsset,
         )
     }

@@ -2,12 +2,12 @@ package net.muratov.intercom.voip
 
 import android.Manifest
 import android.content.Context
-import android.media.Ringtone
-import android.media.RingtoneManager
+import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,10 +16,14 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
-import org.linphone.core.Call
 import kotlinx.coroutines.launch
 import net.muratov.intercom.databinding.ActivityIncomingCallBinding
+import net.muratov.intercom.video.createRtspPlaybackView
+import net.muratov.intercom.video.playRtspOnView
+import net.muratov.intercom.video.releaseRtspPlaybackView
+import org.linphone.core.Call
 import java.io.File
+
 class IncomingCallActivity : AppCompatActivity() {
     private lateinit var binding: ActivityIncomingCallBinding
 
@@ -27,6 +31,7 @@ class IncomingCallActivity : AppCompatActivity() {
     private var cameraGranted = false
     private var incomingCallSound: IncomingCallSound? = null
     private var incomingCallSoundAccountId: String? = null
+    private var previewPlaybackView: View? = null
 
     private val appContainer: net.muratov.intercom.AppContainer
         get() = (application as net.muratov.intercom.MainApplication).appContainer
@@ -71,6 +76,7 @@ class IncomingCallActivity : AppCompatActivity() {
 
     override fun onPause() {
         incomingCallSound?.stop()
+        clearRemotePreviewPlayback()
         SipCoreManager.attachVideoWindows(null, null)
         super.onPause()
     }
@@ -84,6 +90,7 @@ class IncomingCallActivity : AppCompatActivity() {
     override fun onDestroy() {
         incomingCallSound?.release()
         incomingCallSound = null
+        clearRemotePreviewPlayback()
         super.onDestroy()
     }
 
@@ -161,16 +168,56 @@ class IncomingCallActivity : AppCompatActivity() {
     }
 
     private fun refreshVideoWindows() {
+        val currentAccount = getCurrentAccount()
+        val previewRtspUrl = currentAccount?.incomingPreviewRtspUrl
+        if (!previewRtspUrl.isNullOrBlank()) {
+            binding.remoteVideoSurface.visibility = View.GONE
+            binding.remotePreviewContainer.visibility = View.VISIBLE
+            SipCoreManager.attachVideoWindows(null, null)
+            val playbackView = previewPlaybackView ?: createRtspPlaybackView(
+                context = this,
+                playbackEngine = currentAccount.incomingPreviewPlaybackEngine,
+            ).also { view ->
+                previewPlaybackView = view
+                binding.remotePreviewContainer.removeAllViews()
+                binding.remotePreviewContainer.addView(view)
+            }
+            playRtspOnView(
+                view = playbackView,
+                url = previewRtspUrl,
+                headers = currentAccount.incomingPreviewHeaders,
+                muted = true,
+            )
+            return
+        }
+
+        clearRemotePreviewPlayback()
+        binding.remotePreviewContainer.visibility = View.GONE
+        binding.remoteVideoSurface.visibility = View.VISIBLE
         SipCoreManager.attachVideoWindows(binding.remoteVideoSurface, null)
     }
 
+    private fun clearRemotePreviewPlayback() {
+        previewPlaybackView?.let { view ->
+            releaseRtspPlaybackView(view)
+            binding.remotePreviewContainer.removeView(view)
+        }
+        previewPlaybackView = null
+    }
+
     private fun applyWindowInsets() {
-        val layoutParams = binding.callActionsBar.layoutParams as ViewGroup.MarginLayoutParams
-        val baseBottomMargin = layoutParams.bottomMargin
+        val actionsLayoutParams = binding.callActionsBar.layoutParams as ViewGroup.MarginLayoutParams
+        val openButtonLayoutParams = binding.openButton.layoutParams as ViewGroup.MarginLayoutParams
+        val baseActionsBottomMargin = actionsLayoutParams.bottomMargin
+        val baseOpenButtonBottomMargin = openButtonLayoutParams.bottomMargin
+        val baseOpenButtonEndMargin = openButtonLayoutParams.marginEnd
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val navigationBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            layoutParams.bottomMargin = baseBottomMargin + navigationBarInsets.bottom
-            binding.callActionsBar.layoutParams = layoutParams
+            actionsLayoutParams.bottomMargin = baseActionsBottomMargin + navigationBarInsets.bottom
+            binding.callActionsBar.layoutParams = actionsLayoutParams
+            openButtonLayoutParams.bottomMargin = baseOpenButtonBottomMargin + navigationBarInsets.bottom
+            openButtonLayoutParams.marginEnd = baseOpenButtonEndMargin + navigationBarInsets.right
+            binding.openButton.layoutParams = openButtonLayoutParams
             insets
         }
     }
@@ -185,57 +232,43 @@ class IncomingCallActivity : AppCompatActivity() {
         incomingCallSound = resolveIncomingCallSoundForAccount(accountId)
     }
 
+    private fun getCurrentAccount() = SipCoreManager.getCurrentCallAccountId()?.let { accountId ->
+        appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == accountId }
+    }
+
     private fun resolveIncomingCallSoundForAccount(accountId: String?): IncomingCallSound? {
         val ringtoneAsset = accountId?.let { id ->
             appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == id }?.ringtoneAsset
         }
-        val assetSound = ringtoneAsset?.let(::createAssetSound)
-        if (assetSound != null) {
-            return assetSound
+        if (ringtoneAsset.isNullOrBlank()) {
+            Log.d("IncomingCallActivity", "No ringtoneAsset configured for account=$accountId")
+            return null
         }
-
-        val ringtoneUris = runCatching {
-            val manager = RingtoneManager(this).apply {
-                setType(RingtoneManager.TYPE_RINGTONE)
-            }
-            buildList {
-                val cursor = manager.cursor ?: return@buildList
-                while (cursor.moveToNext()) {
-                    add(manager.getRingtoneUri(cursor.position))
-                }
-            }
-        }.getOrDefault(emptyList())
-
-        val selectedUri = when {
-            ringtoneUris.isNotEmpty() -> {
-                val index = Math.floorMod(accountId?.hashCode() ?: 0, ringtoneUris.size)
-                ringtoneUris[index]
-            }
-            else -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        if (!ringtoneAsset.endsWith(".mp3", ignoreCase = true)) {
+            Log.w(
+                "IncomingCallActivity",
+                "ringtoneAsset must point to an mp3 file, got=$ringtoneAsset for account=$accountId",
+            )
+            return null
         }
-
-        return selectedUri?.let { uri ->
-            runCatching { RingtoneManager.getRingtone(applicationContext, uri) }
-                .getOrNull()
-                ?.let(::RingtoneIncomingCallSound)
+        return createAssetSound(ringtoneAsset)?.also {
+            Log.d("IncomingCallActivity", "Using mp3 ringtoneAsset=$ringtoneAsset for account=$accountId")
+        } ?: run {
+            Log.w(
+                "IncomingCallActivity",
+                "Failed to load mp3 ringtoneAsset=$ringtoneAsset for account=$accountId",
+            )
+            null
         }
     }
 
     private fun createAssetSound(assetPath: String): IncomingCallSound? {
         val assetSound = runCatching {
-            val assetFileDescriptor = applicationContext.assets.openFd(assetPath)
-            val mediaPlayer = MediaPlayer().apply {
-                setDataSource(
-                    assetFileDescriptor.fileDescriptor,
-                    assetFileDescriptor.startOffset,
-                    assetFileDescriptor.length,
-                )
-                isLooping = true
-                prepare()
-            }
-            assetFileDescriptor.close()
-            MediaPlayerIncomingCallSound(mediaPlayer)
+            val cacheFile = createCachedAssetSoundFile(assetPath)
+            createMediaPlayerSound(
+                dataSourcePath = cacheFile.absolutePath,
+                cleanup = { cacheFile.delete() },
+            )
         }.getOrNull()
         if (assetSound != null) {
             return assetSound
@@ -252,13 +285,43 @@ class IncomingCallActivity : AppCompatActivity() {
         }
 
         return runCatching {
-            val mediaPlayer = MediaPlayer().apply {
-                setDataSource(candidateFile.absolutePath)
-                isLooping = true
-                prepare()
-            }
-            MediaPlayerIncomingCallSound(mediaPlayer)
+            createMediaPlayerSound(dataSourcePath = candidateFile.absolutePath)
         }.getOrNull()
+    }
+
+    private fun createCachedAssetSoundFile(assetPath: String): File {
+        val extension = assetPath.substringAfterLast('.', "")
+            .takeIf { it.isNotBlank() }
+            ?.let { ".$it" }
+            ?: ".mp3"
+        val cacheFile = File.createTempFile("incoming_ringtone_", extension, cacheDir)
+        applicationContext.assets.open(assetPath).use { input ->
+            cacheFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        return cacheFile
+    }
+
+    private fun createMediaPlayerSound(
+        dataSourcePath: String,
+        cleanup: (() -> Unit)? = null,
+    ): IncomingCallSound {
+        val mediaPlayer = MediaPlayer().apply {
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            setDataSource(dataSourcePath)
+            isLooping = true
+            prepare()
+        }
+        return MediaPlayerIncomingCallSound(
+            mediaPlayer = mediaPlayer,
+            cleanup = cleanup,
+        )
     }
 
     private fun requestPermissionsIfNeeded() {
@@ -297,31 +360,9 @@ private interface IncomingCallSound {
     fun release()
 }
 
-private class RingtoneIncomingCallSound(
-    private val ringtone: Ringtone,
-) : IncomingCallSound {
-    override fun playLooping() {
-        runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                ringtone.isLooping = true
-            }
-            if (!ringtone.isPlaying) {
-                ringtone.play()
-            }
-        }
-    }
-
-    override fun stop() {
-        runCatching { ringtone.stop() }
-    }
-
-    override fun release() {
-        stop()
-    }
-}
-
 private class MediaPlayerIncomingCallSound(
     private val mediaPlayer: MediaPlayer,
+    private val cleanup: (() -> Unit)? = null,
 ) : IncomingCallSound {
     override fun playLooping() {
         runCatching {
@@ -346,6 +387,9 @@ private class MediaPlayerIncomingCallSound(
         }
         runCatching {
             mediaPlayer.release()
+        }
+        runCatching {
+            cleanup?.invoke()
         }
     }
 }

@@ -254,8 +254,13 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 - `type`: `"proptech"`
 - `title`
 - `displayName`
+- `username`
+- `password`
+- `domain`
 - `port`
 - `transport`
+- `stunServer`
+- `iceEnabled`
 
 Пример:
 
@@ -266,14 +271,19 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
     "type": "proptech",
     "title": "Домофон",
     "displayName": "MyHome Intercom",
-    "transport": "UDP"
+    "username": "override-user",
+    "password": "secret",
+    "domain": "sip.example.local",
+    "transport": "UDP",
+    "stunServer": "stun.l.google.com:19302",
+    "iceEnabled": true
   }
 }
 ```
 
 `accessControlId` получается через API провайдера. Для выбора нужной точки доступа приложение использует данные API и сопоставляет их по `title` или `id`.
 
-Для `proptech` параметры `STUN/ICE` задаются в коде приложения константами и не читаются из `app_config.json`.
+Если `username`, `password`, `domain`, `stunServer` или `iceEnabled` заданы в конфиге, они переопределяют значения, полученные через API или дефолты приложения. Если поле не задано, остаётся поведение `proptech` по умолчанию.
 
 ## `mqtt`
 
@@ -471,7 +481,7 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 - `transport` для SIP пишется строкой: `UDP`, `TCP` или `TLS`.
 - `stunServer` для SIP-аккаунта указывается строкой, например `stun.l.google.com:19302`.
 - `iceEnabled` для SIP-аккаунта указывается как `true` или `false`.
-- Для `proptech` значения `STUN/ICE` берутся из констант приложения, а не из конфига.
+- Для `proptech` `username/password/domain` приходят из API, а `stunServer/iceEnabled` имеют дефолты в приложении, но все эти значения можно переопределить прямо в `sipAccounts[].provider`.
 - Для MQTT секции `mqtt.clientId` обязателен, без него MQTT не стартует.
 - Если в конфиге нет ни одного потребителя `proptech`, авторизация `proptech` не запускается.
 - Если файл конфига отсутствует или повреждён, приложение покажет экран с просьбой добавить корректный `app_config.json`.

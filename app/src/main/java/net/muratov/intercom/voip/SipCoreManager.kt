@@ -171,17 +171,12 @@ object SipCoreManager {
         Factory.instance().setCacheDir(appContext.cacheDir.absolutePath)
         Factory.instance().setLogCollectionPath(appContext.filesDir.absolutePath)
         Factory.instance().enableLogCollection(LogCollectionState.Enabled)
-        Factory.instance().setLoggerDomain("IntercomLinphone")
+        Factory.instance().setDebugMode(true, "Linphone")
+        Factory.instance().setLoggerDomain("Linphone")
         Factory.instance().enableLogcatLogs(true)
-        Factory.instance().getLoggingService().setDomain("IntercomLinphone")
-        Factory.instance().getLoggingService().setLogLevelMask(
-            LogLevel.Debug.toInt() or
-                LogLevel.Trace.toInt() or
-                LogLevel.Message.toInt() or
-                LogLevel.Warning.toInt() or
-                LogLevel.Error.toInt() or
-                LogLevel.Fatal.toInt()
-        )
+        val loggingService = Factory.instance().getLoggingService()
+        loggingService.setDomain("Linphone")
+        loggingService.setLogLevel(LogLevel.Trace)
 
         copyAsset("linphonerc_default", File(appContext.filesDir, "simple_linphonerc_default"))
         copyAsset("linphonerc_factory", File(appContext.filesDir, "simple_linphonerc_factory"))
@@ -200,10 +195,16 @@ object SipCoreManager {
             policy.automaticallyAccept = true
             policy.automaticallyAcceptDirection = MediaDirection.RecvOnly
             core.videoActivationPolicy = policy
+            // We handle incoming ringtone ourselves with account-specific MP3 files.
+            // Disable every built-in Linphone ringing path to avoid parallel sounds.
+            core.setNativeRingingEnabled(false)
+            core.setVibrationOnIncomingCallEnabled(false)
+            core.setRing(null)
             core.isVideoDisplayEnabled = true
             core.config.setBool("sip", "incoming_calls_early_media", true)
             core.config.setBool("misc", "real_early_media", true)
-            core.ringDuringIncomingEarlyMedia = true
+            core.config.setInt("sound", "disable_ringing", 1)
+            core.ringDuringIncomingEarlyMedia = false
             core.isAutoIterateEnabled = true
             core.addListener(coreListener)
             core.start()

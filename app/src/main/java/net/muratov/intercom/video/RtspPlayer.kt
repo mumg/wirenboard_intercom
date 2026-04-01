@@ -46,6 +46,26 @@ fun RtspPlayer(
     )
 }
 
+fun createRtspPlaybackView(
+    context: Context,
+    playbackEngine: StreamPlaybackEngine,
+): View {
+    return createPlaybackView(context, playbackEngine).asView()
+}
+
+fun playRtspOnView(
+    view: View,
+    url: String,
+    headers: Map<String, String> = emptyMap(),
+    muted: Boolean = false,
+) {
+    (view.getTag(TAG_STREAM_PLAYER) as? StreamPlaybackView)?.play(url, headers, muted)
+}
+
+fun releaseRtspPlaybackView(view: View) {
+    (view.getTag(TAG_STREAM_PLAYER) as? StreamPlaybackView)?.release()
+}
+
 private fun createPlaybackView(
     context: Context,
     playbackEngine: StreamPlaybackEngine,
