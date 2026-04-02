@@ -18,6 +18,7 @@ import org.linphone.core.Reason
 import org.linphone.core.RegistrationState
 import org.linphone.core.TransportType
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArraySet
 
 data class SipCredentials(
@@ -80,6 +81,8 @@ object SipCoreManager {
 
     private var pendingCredentials: MutableList<SipCredentials> = mutableListOf()
     private val accountIdByUsername = mutableMapOf<String, String>()
+    private val registrationUidBySipAccountId = mutableMapOf<String, String>()
+    private val sipAccountIdByRegistrationUid = mutableMapOf<String, String>()
 
     private val coreListener = object : CoreListenerStub() {
         override fun onGlobalStateChanged(core: Core, state: GlobalState, message: String) {
@@ -119,7 +122,7 @@ object SipCoreManager {
                     currentState != Call.State.Released
             activeCall = if (callStillActive) call else null
             activeCallAccountId = if (callStillActive) {
-                call.toAddress.username?.let(accountIdByUsername::get)
+                resolveSipAccountIdForCall(core, call)
             } else {
                 null
             }
@@ -221,6 +224,7 @@ object SipCoreManager {
 
 
     fun register(credentials: SipCredentials) {
+        ensureRegistrationUid(credentials.id)
         if (!coreReady){
             synchronized(pendingCredentials){
                 pendingCredentials.add(credentials)
@@ -300,6 +304,7 @@ object SipCoreManager {
 
     private fun registerInternal(credentials: SipCredentials) {
         accountIdByUsername[credentials.username] = credentials.id
+        val registrationUid = ensureRegistrationUid(credentials.id)
         val identityAddress = Factory.instance().createAddress(
             "sip:${credentials.username}@${credentials.domain}"
         ) ?: run {
@@ -329,9 +334,11 @@ object SipCoreManager {
         accountParams.isRegisterEnabled = true
         accountParams.pushNotificationAllowed = false
         accountParams.idkey = credentials.id
+        accountParams.addCustomParam(ACCOUNT_LINK_CUSTOM_PARAM, registrationUid)
         accountParams.natPolicy = createNatPolicy(credentials)
 
         val account = core.createAccount(accountParams)
+        account.addCustomParam(ACCOUNT_LINK_CUSTOM_PARAM, registrationUid)
         core.addAuthInfo(authInfo)
         core.addAccount(account)
     }
@@ -415,6 +422,40 @@ object SipCoreManager {
         }
     }
 
+    private fun ensureRegistrationUid(sipAccountId: String): String {
+        synchronized(registrationUidBySipAccountId) {
+            return registrationUidBySipAccountId.getOrPut(sipAccountId) {
+                UUID.randomUUID().toString().also { registrationUid ->
+                    sipAccountIdByRegistrationUid[registrationUid] = sipAccountId
+                }
+            }
+        }
+    }
+
+    private fun resolveSipAccountIdForCall(core: Core, call: Call): String? {
+        val localAddress = call.toAddress
+        val matchedAccount = core.accountList.firstOrNull { account ->
+            val identityAddress = account.params.identityAddress ?: return@firstOrNull false
+            identityAddress.domain.equals(localAddress.domain, ignoreCase = true)
+        }
+
+        val registrationUid = matchedAccount
+            ?.getCustomParam(ACCOUNT_LINK_CUSTOM_PARAM)
+            ?.takeIf { it.isNotBlank() }
+            ?: matchedAccount
+                ?.params
+                ?.getCustomParam(ACCOUNT_LINK_CUSTOM_PARAM)
+                ?.takeIf { it.isNotBlank() }
+
+        if (!registrationUid.isNullOrBlank()) {
+            synchronized(registrationUidBySipAccountId) {
+                sipAccountIdByRegistrationUid[registrationUid]?.let { return it }
+            }
+        }
+
+        return localAddress.username?.let(accountIdByUsername::get)
+    }
+
     private fun launchIncomingCallActivity() {
         mainHandler.post {
             val intent = Intent(appContext, IncomingCallActivity::class.java).apply {
@@ -428,4 +469,5 @@ object SipCoreManager {
         }
     }
 
+    private const val ACCOUNT_LINK_CUSTOM_PARAM = "intercom_account_uid"
 }
