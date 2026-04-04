@@ -17,5 +17,6 @@
 ~/Library/Android/sdk/platform-tools/adb install -r app/release/app-arm64-v8a-release.apk
 ~/Library/Android/sdk/platform-tools/adb shell am start -n net.muratov.intercom/.MainActivity
 ~/Library/Android/sdk/platform-tools/adb disconnect
+#~/Library/Android/sdk/platform-tools/adb shell
 
 

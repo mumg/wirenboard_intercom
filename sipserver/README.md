@@ -24,7 +24,7 @@ make run
 
 ```bash
 mkdir -p ./bin
-env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS=linux GOARCH=arm64 \
+env GOCACHE=/tmp/gocache GOOS=linux GOARCH=arm64 \
   go build -o ./bin/sipserver-linux-arm64 ./cmd/sipserver
 ```
 
@@ -34,7 +34,7 @@ env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS=linux GOARCH=arm64 \
 
 ```bash
 mkdir -p ./bin
-env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS=linux GOARCH=arm GOARM=7 \
+env GOCACHE=/tmp/gocache GOOS=linux GOARCH=arm GOARM=7 \
   go build -o ./bin/sipserver-linux-armv7 ./cmd/sipserver
 ```
 
@@ -52,7 +52,7 @@ make build-amd64
 
 ```bash
 mkdir -p ./bin
-env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS=linux GOARCH=amd64 \
+env GOCACHE=/tmp/gocache GOOS=linux GOARCH=amd64 \
   go build -o ./bin/sipserver-linux-amd64 ./cmd/sipserver
 ```
 
@@ -113,7 +113,7 @@ make dpkg-amd64
 
 ```bash
 mkdir -p ./bin
-env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS=darwin GOARCH=arm64 \
+env GOCACHE=/tmp/gocache GOOS=darwin GOARCH=arm64 \
   go build -o ./bin/sipserver-darwin-arm64 ./cmd/sipserver
 ```
 
@@ -122,8 +122,8 @@ env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS=darwin GOARCH=arm64 \
 Проверка проекта:
 
 ```bash
-env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath go build ./...
-env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath go vet ./...
+env GOCACHE=/tmp/gocache go build ./...
+env GOCACHE=/tmp/gocache go vet ./...
 ```
 
 ## Запуск как service в Linux

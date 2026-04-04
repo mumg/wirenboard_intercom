@@ -3,6 +3,7 @@ package net.muratov.intercom.data.provider
 import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.data.model.SipAccountConfig
+import net.muratov.intercom.data.model.SipIncomingPreview
 import net.muratov.intercom.data.model.SipAccountSourceConfig
 import net.muratov.intercom.data.model.StreamSourceConfig
 
@@ -12,6 +13,18 @@ interface IntercomProvider {
     suspend fun resolveStream(source: StreamSourceConfig): RtspStream? = null
 
     suspend fun resolveSipAccount(source: SipAccountSourceConfig): SipAccountConfig? = null
+
+    suspend fun resolveSipIncomingPreview(
+        source: SipAccountSourceConfig,
+        account: SipAccountConfig,
+    ): SipIncomingPreview? {
+        val previewUrl = account.incomingPreviewRtspUrl?.takeIf { it.isNotBlank() } ?: return null
+        return SipIncomingPreview(
+            rtspUrl = previewUrl,
+            headers = account.incomingPreviewHeaders,
+            playbackEngine = account.incomingPreviewPlaybackEngine,
+        )
+    }
 
     fun canOpen(action: ProviderOpenAction): Boolean = false
 

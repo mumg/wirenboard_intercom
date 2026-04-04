@@ -2,9 +2,11 @@ package net.muratov.intercom.data.provider
 
 import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.data.model.SipAccountConfig
+import net.muratov.intercom.data.model.SipIncomingPreview
 import net.muratov.intercom.data.model.SipAccountSourceConfig
 import net.muratov.intercom.data.model.SipTransport
 import net.muratov.intercom.data.model.StreamPlaybackEngine
+import net.muratov.intercom.logging.IntercomFileLogger
 import net.muratov.intercom.provider.myhome.MyHomeAccessControl
 import net.muratov.intercom.provider.myhome.MyHomeCameraResource
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
@@ -22,19 +24,41 @@ class ProptechSipAccountDataProvider(
 
     override suspend fun resolveSipAccount(source: SipAccountSourceConfig): SipAccountConfig? {
         val state = providerService.state.value
-        if (state.tokens == null) return null
-        val placeId = state.selectedPlaceId ?: return null
+        if (state.tokens == null) {
+            IntercomFileLogger.w(TAG, "resolveSipAccount skipped sourceId=${source.id}: tokens are null")
+            return null
+        }
+        val placeId = state.selectedPlaceId ?: run {
+            IntercomFileLogger.w(TAG, "resolveSipAccount skipped sourceId=${source.id}: selectedPlaceId is null")
+            return null
+        }
+        IntercomFileLogger.i(
+            TAG,
+            "resolveSipAccount started sourceId=${source.id} title=${source.provider.title} placeId=$placeId",
+        )
         val accessControls = providerService.getPlaceAccessControls(placeId)
-        val accessControl = selectAccessControl(source, accessControls) ?: return null
+        val accessControl = selectAccessControl(source, accessControls) ?: run {
+            IntercomFileLogger.w(
+                TAG,
+                "resolveSipAccount failed sourceId=${source.id}: access control not found among ${accessControls.size} entries",
+            )
+            return null
+        }
+        IntercomFileLogger.i(
+            TAG,
+            "Selected accessControl id=${accessControl.id} name=${accessControl.name} externalCameraId=${accessControl.externalCameraId}",
+        )
         val cameraResources = runCatching {
             providerService.getPlaceCameras(placeId) + providerService.getPlacePublicCameras(placeId)
+        }.onFailure { error ->
+            IntercomFileLogger.w(TAG, "Failed to load camera resources for placeId=$placeId", error)
         }.getOrDefault(emptyList())
+        IntercomFileLogger.d(TAG, "Loaded cameraResources count=${cameraResources.size} for placeId=$placeId")
         val camera = selectCamera(source, cameraResources, accessControl)
-        val rtspUrl = accessControl.externalCameraId
-            ?.let { externalCameraId ->
-                runCatching { providerService.getForpostCameraVideoUrl(externalCameraId) }.getOrNull()
-            }
-            ?: camera?.extractRtspUrl()
+        IntercomFileLogger.d(
+            TAG,
+            "Selected camera id=${camera?.id} title=${camera?.title} matchedByExternalCamera=${camera?.id == accessControl.externalCameraId}",
+        )
         val sipDevice = providerService.registerSipDevice(placeId, accessControl.id)
         val title = source.provider.title.ifBlank { accessControl.name }
         val username = source.provider.username.ifBlank { sipDevice.login }
@@ -52,7 +76,6 @@ class ProptechSipAccountDataProvider(
             stunServer = source.provider.stunServer.ifBlank { PROPTECH_STUN_SERVER },
             iceEnabled = source.provider.iceEnabled ?: PROPTECH_ICE_ENABLED,
             ringtoneAsset = source.provider.ringtoneAsset,
-            incomingPreviewRtspUrl = rtspUrl,
             incomingPreviewHeaders = mapOf("Authorization" to state.tokens.authorizationHeader),
             incomingPreviewPlaybackEngine = StreamPlaybackEngine.EXO_PLAYER,
             openAction = ProviderOpenAction(
@@ -60,6 +83,84 @@ class ProptechSipAccountDataProvider(
                 targetId = accessControl.id.toString(),
                 extras = mapOf("placeId" to placeId.toString()),
             ),
+        )
+    }
+
+    override suspend fun resolveSipIncomingPreview(
+        source: SipAccountSourceConfig,
+        account: SipAccountConfig,
+    ): SipIncomingPreview? {
+        val state = providerService.state.value
+        if (state.tokens == null) {
+            IntercomFileLogger.w(TAG, "resolveSipIncomingPreview skipped accountId=${account.id}: tokens are null")
+            return null
+        }
+        val placeId = state.selectedPlaceId ?: run {
+            IntercomFileLogger.w(TAG, "resolveSipIncomingPreview skipped accountId=${account.id}: selectedPlaceId is null")
+            return null
+        }
+        IntercomFileLogger.i(
+            TAG,
+            "resolveSipIncomingPreview started accountId=${account.id} sourceId=${source.id} placeId=$placeId",
+        )
+        val accessControls = providerService.getPlaceAccessControls(placeId)
+        val accessControl = selectAccessControl(source, accessControls) ?: run {
+            IntercomFileLogger.w(
+                TAG,
+                "resolveSipIncomingPreview failed accountId=${account.id}: access control not found among ${accessControls.size} entries",
+            )
+            return null
+        }
+        IntercomFileLogger.i(
+            TAG,
+            "resolveSipIncomingPreview selected accessControl id=${accessControl.id} name=${accessControl.name} externalCameraId=${accessControl.externalCameraId}",
+        )
+        val cameraResources = runCatching {
+            providerService.getPlaceCameras(placeId) + providerService.getPlacePublicCameras(placeId)
+        }.onFailure { error ->
+            IntercomFileLogger.w(TAG, "resolveSipIncomingPreview failed to load camera resources for placeId=$placeId", error)
+        }.getOrDefault(emptyList())
+        val camera = selectCamera(source, cameraResources, accessControl)
+        IntercomFileLogger.d(
+            TAG,
+            "resolveSipIncomingPreview selected camera id=${camera?.id} title=${camera?.title} matchedByExternalCamera=${camera?.id == accessControl.externalCameraId}",
+        )
+        val forpostRtspUrl = accessControl.externalCameraId
+            ?.let { externalCameraId ->
+                IntercomFileLogger.i(TAG, "Requesting proptech RTSP URL for externalCameraId=$externalCameraId")
+                runCatching { providerService.getForpostCameraVideoUrl(externalCameraId) }
+                    .onSuccess { url ->
+                        IntercomFileLogger.i(
+                            TAG,
+                            "Received proptech RTSP URL for externalCameraId=$externalCameraId url=${url ?: "<null>"}",
+                        )
+                    }
+                    .onFailure { error ->
+                        IntercomFileLogger.w(
+                            TAG,
+                            "Failed to receive proptech RTSP URL for externalCameraId=$externalCameraId",
+                            error,
+                        )
+                    }
+                    .getOrNull()
+            }
+        val cameraRtspUrl = camera?.extractRtspUrl()
+        if (forpostRtspUrl.isNullOrBlank()) {
+            IntercomFileLogger.i(
+                TAG,
+                "Using camera resource RTSP fallback sourceId=${source.id} cameraId=${camera?.id} url=${cameraRtspUrl ?: "<null>"}",
+            )
+        }
+        val rtspUrl = forpostRtspUrl ?: cameraRtspUrl
+        IntercomFileLogger.i(
+            TAG,
+            "Resolved live incoming preview RTSP url for accountId=${account.id} sourceId=${source.id} url=${rtspUrl ?: "<null>"}",
+        )
+        val nonBlankRtspUrl = rtspUrl?.takeIf { it.isNotBlank() } ?: return null
+        return SipIncomingPreview(
+            rtspUrl = nonBlankRtspUrl,
+            headers = mapOf("Authorization" to state.tokens.authorizationHeader),
+            playbackEngine = StreamPlaybackEngine.EXO_PLAYER,
         )
     }
 
@@ -96,6 +197,7 @@ class ProptechSipAccountDataProvider(
     }
 
     private companion object {
+        private const val TAG = "ProptechSipAccount"
         private const val PROPTECH_STUN_SERVER = "stun.sipnet.ru:3478"
         private const val PROPTECH_ICE_ENABLED = true
     }

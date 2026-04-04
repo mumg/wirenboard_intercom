@@ -1,12 +1,16 @@
 package net.muratov.intercom
 
+import android.app.ActivityManager
 import android.app.Application
+import android.os.Build
+import android.os.Process
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import net.muratov.intercom.logging.IntercomFileLogger
 import net.muratov.intercom.data.provider.ConfigSipAccountDataProvider
 import net.muratov.intercom.data.provider.ConfigStreamDataProvider
 import net.muratov.intercom.data.provider.IntercomProvider
@@ -26,6 +30,7 @@ import net.muratov.intercom.provider.myhome.MyHomeProviderService
 import net.muratov.intercom.voip.SipCoreManager
 import net.muratov.intercom.voip.SipCredentials
 import org.linphone.core.TransportType
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainApplication : Application() {
@@ -34,6 +39,12 @@ class MainApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        val processName = currentProcessName()
+        IntercomFileLogger.i("MainApplication", "onCreate process=$processName package=$packageName")
+        if (!isMainProcess(processName)) {
+            IntercomFileLogger.i("MainApplication", "Skipping app initialization in non-main process=$processName")
+            return
+        }
         AppCrashRestarter.install(this)
         SipCoreManager.initialize(this)
         reloadAppContainer()
@@ -44,6 +55,11 @@ class MainApplication : Application() {
             appContainer.dispose()
         }
         val configResult = AppConfigLoader(this).load()
+        val logFilePath = File(configResult.filePath).parentFile
+            ?.resolve("intercom.log")
+            ?.absolutePath
+            .orEmpty()
+        IntercomFileLogger.setLogFilePath(logFilePath)
         val config = (configResult as? AppConfigLoadResult.Success)?.config ?: AppConfig()
         val isConfigValid = configResult is AppConfigLoadResult.Success
         val configFilePath = configResult.filePath
@@ -96,6 +112,22 @@ class MainApplication : Application() {
             providers = providers,
             mqttCallStateService = mqttCallStateService,
         )
+    }
+
+    private fun isMainProcess(processName: String?): Boolean {
+        return processName == null || processName == packageName
+    }
+
+    private fun currentProcessName(): String? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            return Application.getProcessName()
+        }
+
+        val activityManager = getSystemService(ACTIVITY_SERVICE) as? ActivityManager ?: return null
+        val pid = Process.myPid()
+        return activityManager.runningAppProcesses
+            ?.firstOrNull { it.pid == pid }
+            ?.processName
     }
 }
 

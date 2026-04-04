@@ -42,12 +42,12 @@ trap cleanup EXIT
 build_binary() {
   mkdir -p "$BIN_DIR"
   if [[ "$TARGET_ARCH" == "arm" ]]; then
-    env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" GOARM="$TARGET_GOARM" \
+    env GOCACHE=/tmp/gocache GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" GOARM="$TARGET_GOARM" \
       go build -o "$BUILD_BIN" ./cmd/sipserver
     return
   fi
 
-  env GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" \
+  env GOCACHE=/tmp/gocache GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" \
     go build -o "$BUILD_BIN" ./cmd/sipserver
 }
 

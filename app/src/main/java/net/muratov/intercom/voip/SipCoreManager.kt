@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import net.muratov.intercom.logging.IntercomFileLogger
 import org.linphone.core.Account
 import org.linphone.core.Call
 import org.linphone.core.Core
@@ -49,6 +50,7 @@ data class CallSnapshot(
 )
 
 object SipCoreManager {
+    private const val TAG = "SipCoreManager"
     interface Listener {
         fun onCoreStarted() {}
 
@@ -86,11 +88,15 @@ object SipCoreManager {
 
     private val coreListener = object : CoreListenerStub() {
         override fun onGlobalStateChanged(core: Core, state: GlobalState, message: String) {
+            IntercomFileLogger.i(
+                TAG,
+                "onGlobalStateChanged state=$state message=$message coreReadyBefore=$coreReady pendingCredentials=${pendingCredentials.size}",
+            )
             if (state == GlobalState.On) {
                 coreReady = true
                 updateMediaCapabilities(core, microphoneAllowed, cameraAllowed)
                 dispatchCoreStarted()
-                synchronized(pendingCredentials){
+                synchronized(pendingCredentials) {
                     pendingCredentials.forEach {
                         registerInternal(it)
                     }
@@ -107,7 +113,10 @@ object SipCoreManager {
             state: RegistrationState?,
             message: String
         ) {
-
+            IntercomFileLogger.i(
+                TAG,
+                "onAccountRegistrationStateChanged state=$state message=$message idkey=${account.params.idkey} customParam=${account.getCustomParam(ACCOUNT_LINK_CUSTOM_PARAM)}",
+            )
         }
 
         override fun onCallStateChanged(
@@ -126,14 +135,20 @@ object SipCoreManager {
             } else {
                 null
             }
+            IntercomFileLogger.i(
+                TAG,
+                "onCallStateChanged state=$currentState message=$message callStillActive=$callStillActive remote=${call.remoteAddress.asStringUriOnly()} to=${call.toAddress.asStringUriOnly()} resolvedAccountId=$activeCallAccountId callsNb=${core.callsNb}",
+            )
 
             if (call.dir == Call.Dir.Incoming &&
                 (currentState == Call.State.IncomingReceived || currentState == Call.State.IncomingEarlyMedia) &&
                 !incomingActivityLaunchRequested
             ) {
+                IntercomFileLogger.i(TAG, "Incoming call detected, scheduling IncomingCallActivity launch")
                 incomingActivityLaunchRequested = true
                 launchIncomingCallActivity()
             } else if (!callStillActive) {
+                IntercomFileLogger.i(TAG, "Call no longer active, resetting launch flags")
                 incomingActivityLaunchRequested = false
                 inCallActivityLaunchRequested = false
             }
@@ -162,12 +177,17 @@ object SipCoreManager {
                 isReceivingVideo = isReceivingVideo,
                 isSendingVideo = isSendingVideo
             )
+            IntercomFileLogger.d(
+                TAG,
+                "Updated call snapshot state=$currentState receivingVideo=$isReceivingVideo sendingVideo=$isSendingVideo accountId=$activeCallAccountId",
+            )
             dispatchCallChanged(lastCallSnapshot)
         }
     }
 
     fun initialize(context: Context) {
         if (::coreThread.isInitialized) return
+        IntercomFileLogger.i(TAG, "initialize() starting")
 
         appContext = context.applicationContext
 
@@ -188,6 +208,7 @@ object SipCoreManager {
         coreThread.start()
         coreHandler = Handler(coreThread.looper)
         coreHandler.post {
+            IntercomFileLogger.i(TAG, "Core thread started, creating Linphone core")
             val config = Factory.instance().createConfigWithFactory(
                 File(appContext.filesDir, "simple_linphonerc_default").absolutePath,
                 File(appContext.filesDir, "simple_linphonerc_factory").absolutePath
@@ -211,26 +232,34 @@ object SipCoreManager {
             core.isAutoIterateEnabled = true
             core.addListener(coreListener)
             core.start()
+            IntercomFileLogger.i(TAG, "Linphone core.start() invoked")
         }
     }
 
     fun addListener(listener: Listener) {
         listeners.add(listener)
+        IntercomFileLogger.d(TAG, "addListener listener=${listener::class.java.name} total=${listeners.size}")
     }
 
     fun removeListener(listener: Listener) {
         listeners.remove(listener)
+        IntercomFileLogger.d(TAG, "removeListener listener=${listener::class.java.name} total=${listeners.size}")
     }
 
 
     fun register(credentials: SipCredentials) {
-        ensureRegistrationUid(credentials.id)
-        if (!coreReady){
-            synchronized(pendingCredentials){
+        val registrationUid = ensureRegistrationUid(credentials.id)
+        IntercomFileLogger.i(
+            TAG,
+            "register requested sipAccountId=${credentials.id} username=${credentials.username} domain=${credentials.domain} port=${credentials.port} transport=${credentials.transport} stun=${credentials.stunServer} ice=${credentials.iceEnabled} registrationUid=$registrationUid coreReady=$coreReady",
+        )
+        if (!coreReady) {
+            synchronized(pendingCredentials) {
                 pendingCredentials.add(credentials)
+                IntercomFileLogger.d(TAG, "Queued credentials pending=${pendingCredentials.size}")
             }
-        }else {
-            onCoreThread { core ->
+        } else {
+            onCoreThread { _ ->
                 registerInternal(credentials)
             }
         }
@@ -239,6 +268,7 @@ object SipCoreManager {
     fun updatePermissions(hasMicrophone: Boolean, hasCamera: Boolean) {
         microphoneAllowed = hasMicrophone
         cameraAllowed = hasCamera
+        IntercomFileLogger.i(TAG, "updatePermissions microphone=$hasMicrophone camera=$hasCamera")
         onCoreThread { core ->
             updateMediaCapabilities(core, hasMicrophone, hasCamera)
             applyCurrentVideoWindows(core)
@@ -248,14 +278,23 @@ object SipCoreManager {
     fun attachVideoWindows(remoteWindow: Any?, previewWindow: Any?) {
         remoteVideoWindow = remoteWindow
         previewVideoWindow = previewWindow
+        IntercomFileLogger.i(
+            TAG,
+            "attachVideoWindows remote=${remoteWindow?.javaClass?.simpleName} preview=${previewWindow?.javaClass?.simpleName}",
+        )
         onCoreThread(::applyCurrentVideoWindows)
     }
 
     fun answerIncomingCall() {
         onCoreThread { core ->
             val call = findCurrentManagedCall(core) ?: return@onCoreThread
+            IntercomFileLogger.i(
+                TAG,
+                "answerIncomingCall state=${call.state} remote=${call.remoteAddress.asStringUriOnly()} accountId=$activeCallAccountId microphoneAllowed=$microphoneAllowed",
+            )
             val params = core.createCallParams(call)
             if (params == null) {
+                IntercomFileLogger.w(TAG, "answerIncomingCall createCallParams returned null, using accept()")
                 call.accept()
                 return@onCoreThread
             }
@@ -267,18 +306,25 @@ object SipCoreManager {
 
             updateMediaCapabilities(core, microphoneAllowed, false)
             call.acceptWithParams(params)
+            IntercomFileLogger.i(TAG, "acceptWithParams invoked videoEnabled=${params.isVideoEnabled} videoDirection=${params.videoDirection}")
         }
     }
 
     fun terminateCurrentCall() {
         onCoreThread { core ->
             val call = findCurrentManagedCall(core) ?: return@onCoreThread
+            IntercomFileLogger.i(
+                TAG,
+                "terminateCurrentCall state=${call.state} dir=${call.dir} remote=${call.remoteAddress.asStringUriOnly()} accountId=$activeCallAccountId",
+            )
             if (call.dir == Call.Dir.Incoming &&
                 (call.state == Call.State.IncomingReceived || call.state == Call.State.IncomingEarlyMedia)
             ) {
                 call.decline(Reason.Declined)
+                IntercomFileLogger.i(TAG, "Incoming ringing call declined")
             } else {
                 call.terminate()
+                IntercomFileLogger.i(TAG, "Active call terminated")
             }
         }
     }
@@ -292,19 +338,28 @@ object SipCoreManager {
     }
 
     private fun findCurrentManagedCall(core: Core): Call? {
-        return activeCall
+        val call = activeCall
             ?: core.currentCall
             ?: core.calls.firstOrNull { call ->
                 call.state != Call.State.End &&
                     call.state != Call.State.Error &&
                     call.state != Call.State.Released
             }
+        IntercomFileLogger.d(
+            TAG,
+            "findCurrentManagedCall result=${call?.remoteAddress?.asStringUriOnly()} state=${call?.state}",
+        )
+        return call
     }
 
 
     private fun registerInternal(credentials: SipCredentials) {
         accountIdByUsername[credentials.username] = credentials.id
         val registrationUid = ensureRegistrationUid(credentials.id)
+        IntercomFileLogger.i(
+            TAG,
+            "registerInternal sipAccountId=${credentials.id} username=${credentials.username} registrationUid=$registrationUid",
+        )
         val identityAddress = Factory.instance().createAddress(
             "sip:${credentials.username}@${credentials.domain}"
         ) ?: run {
@@ -341,6 +396,10 @@ object SipCoreManager {
         account.addCustomParam(ACCOUNT_LINK_CUSTOM_PARAM, registrationUid)
         core.addAuthInfo(authInfo)
         core.addAccount(account)
+        IntercomFileLogger.i(
+            TAG,
+            "Account added sipAccountId=${credentials.id} idkey=${account.params.idkey} customParam=${account.getCustomParam(ACCOUNT_LINK_CUSTOM_PARAM)}",
+        )
     }
 
     private fun createNatPolicy(credentials: SipCredentials) = core.createNatPolicy().apply {
@@ -348,6 +407,10 @@ object SipCoreManager {
         val stunServer = credentials.stunServer.trim()
         setStunEnabled(stunServer.isNotEmpty())
         setStunServer(stunServer.ifEmpty { null })
+        IntercomFileLogger.d(
+            TAG,
+            "createNatPolicy sipAccountId=${credentials.id} stunEnabled=${stunServer.isNotEmpty()} stunServer=${stunServer.ifEmpty { "<empty>" }} iceEnabled=${credentials.iceEnabled}",
+        )
     }
 
 
@@ -356,6 +419,7 @@ object SipCoreManager {
         if (call == null) {
             core.nativeVideoWindowId = null
             core.nativePreviewWindowId = null
+            IntercomFileLogger.d(TAG, "applyCurrentVideoWindows no active call, windows cleared")
             return
         }
 
@@ -368,41 +432,52 @@ object SipCoreManager {
         } else {
             null
         }
+        IntercomFileLogger.d(
+            TAG,
+            "applyCurrentVideoWindows state=${call.state} remoteWindow=${remoteVideoWindow?.javaClass?.simpleName} previewWindow=${previewVideoWindow?.javaClass?.simpleName} cameraAllowed=$cameraAllowed isSendingVideo=$isSendingVideo",
+        )
     }
 
     private fun updateMediaCapabilities(core: Core, hasMicrophone: Boolean, hasCamera: Boolean) {
         core.isMicEnabled = hasMicrophone
         core.isVideoCaptureEnabled = hasCamera
         core.isVideoDisplayEnabled = true
+        IntercomFileLogger.d(TAG, "updateMediaCapabilities mic=$hasMicrophone camera=$hasCamera")
     }
 
     private fun onCoreThread(block: (Core) -> Unit) {
-        if (!::coreHandler.isInitialized || !::core.isInitialized) return
+        if (!::coreHandler.isInitialized || !::core.isInitialized) {
+            IntercomFileLogger.w(TAG, "onCoreThread skipped because core handler or core is not initialized")
+            return
+        }
         coreHandler.post {
             block(core)
         }
     }
 
     private fun dispatchCoreStarted() {
+        IntercomFileLogger.i(TAG, "dispatchCoreStarted listeners=${listeners.size}")
         mainHandler.post {
             listeners.forEach { it.onCoreStarted() }
         }
     }
 
     private fun dispatchRegistrationChanged(snapshot: RegistrationSnapshot) {
+        IntercomFileLogger.d(TAG, "dispatchRegistrationChanged state=${snapshot.state} identity=${snapshot.identity} message=${snapshot.message}")
         mainHandler.post {
             listeners.forEach { it.onRegistrationChanged(snapshot) }
         }
     }
 
     private fun dispatchCallChanged(snapshot: CallSnapshot?) {
+        IntercomFileLogger.d(TAG, "dispatchCallChanged snapshot=${snapshot?.state} remote=${snapshot?.remoteAddress} incoming=${snapshot?.isIncoming}")
         mainHandler.post {
             listeners.forEach { it.onCallChanged(snapshot) }
         }
     }
 
     private fun dispatchRegistrationError(message: String) {
-
+        IntercomFileLogger.e(TAG, "dispatchRegistrationError message=$message")
     }
 
     private fun copyAsset(assetName: String, targetFile: File) {
@@ -411,6 +486,7 @@ object SipCoreManager {
                 input.copyTo(output)
             }
         }
+        IntercomFileLogger.d(TAG, "copyAsset asset=$assetName target=${targetFile.absolutePath}")
     }
 
     private fun normalizeServerAddress(value: String): String {
@@ -427,6 +503,7 @@ object SipCoreManager {
             return registrationUidBySipAccountId.getOrPut(sipAccountId) {
                 UUID.randomUUID().toString().also { registrationUid ->
                     sipAccountIdByRegistrationUid[registrationUid] = sipAccountId
+                    IntercomFileLogger.i(TAG, "Generated registrationUid=$registrationUid for sipAccountId=$sipAccountId")
                 }
             }
         }
@@ -434,10 +511,32 @@ object SipCoreManager {
 
     private fun resolveSipAccountIdForCall(core: Core, call: Call): String? {
         val localAddress = call.toAddress
+        IntercomFileLogger.d(
+            TAG,
+            "resolveSipAccountIdForCall start to=${localAddress.asStringUriOnly()} username=${localAddress.username ?: "<none>"} domain=${localAddress.domain ?: "<none>"} accountListSize=${core.accountList.size}",
+        )
+        core.accountList.forEachIndexed { index, account ->
+            val identityAddress = account.params.identityAddress
+            IntercomFileLogger.d(
+                TAG,
+                "resolveSipAccountIdForCall inspect[$index] idkey=${account.params.idkey ?: "<none>"} identity=${identityAddress?.asStringUriOnly() ?: "<none>"} accountCustom=${account.getCustomParam(ACCOUNT_LINK_CUSTOM_PARAM) ?: "<none>"} paramsCustom=${account.params.getCustomParam(ACCOUNT_LINK_CUSTOM_PARAM) ?: "<none>"}",
+            )
+        }
         val matchedAccount = core.accountList.firstOrNull { account ->
             val identityAddress = account.params.identityAddress ?: return@firstOrNull false
-            identityAddress.domain.equals(localAddress.domain, ignoreCase = true)
+            val sameDomain = identityAddress.domain.equals(localAddress.domain, ignoreCase = true)
+            val localUsername = localAddress.username
+            val sameUsername = localUsername.isNullOrBlank() || identityAddress.username.equals(localUsername, ignoreCase = true)
+            IntercomFileLogger.d(
+                TAG,
+                "resolveSipAccountIdForCall compare identity=${identityAddress.asStringUriOnly()} sameDomain=$sameDomain sameUsername=$sameUsername",
+            )
+            sameDomain && sameUsername
         }
+        IntercomFileLogger.d(
+            TAG,
+            "resolveSipAccountIdForCall matchedAccount=${matchedAccount?.params?.identityAddress?.asStringUriOnly() ?: "<none>"} matchedIdkey=${matchedAccount?.params?.idkey ?: "<none>"}",
+        )
 
         val registrationUid = matchedAccount
             ?.getCustomParam(ACCOUNT_LINK_CUSTOM_PARAM)
@@ -446,14 +545,33 @@ object SipCoreManager {
                 ?.params
                 ?.getCustomParam(ACCOUNT_LINK_CUSTOM_PARAM)
                 ?.takeIf { it.isNotBlank() }
+        IntercomFileLogger.d(
+            TAG,
+            "resolveSipAccountIdForCall extracted registrationUid=${registrationUid ?: "<none>"}",
+        )
 
         if (!registrationUid.isNullOrBlank()) {
             synchronized(registrationUidBySipAccountId) {
-                sipAccountIdByRegistrationUid[registrationUid]?.let { return it }
+                sipAccountIdByRegistrationUid[registrationUid]?.let {
+                    IntercomFileLogger.i(
+                        TAG,
+                        "resolveSipAccountIdForCall matched registrationUid=$registrationUid sipAccountId=$it to=${localAddress.asStringUriOnly()}",
+                    )
+                    return it
+                }
             }
+            IntercomFileLogger.w(
+                TAG,
+                "resolveSipAccountIdForCall registrationUid=$registrationUid not found in sipAccountIdByRegistrationUid map keys=${sipAccountIdByRegistrationUid.keys}",
+            )
         }
 
-        return localAddress.username?.let(accountIdByUsername::get)
+        val fallbackAccountId = localAddress.username?.let(accountIdByUsername::get)
+        IntercomFileLogger.w(
+            TAG,
+            "resolveSipAccountIdForCall fell back to username mapping to=${localAddress.asStringUriOnly()} registrationUid=${registrationUid ?: "<none>"} fallbackAccountId=${fallbackAccountId ?: "<none>"}",
+        )
+        return fallbackAccountId
     }
 
     private fun launchIncomingCallActivity() {
@@ -465,6 +583,7 @@ object SipCoreManager {
                             Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                 )
             }
+            IntercomFileLogger.i(TAG, "Launching IncomingCallActivity accountId=$activeCallAccountId")
             appContext.startActivity(intent)
         }
     }

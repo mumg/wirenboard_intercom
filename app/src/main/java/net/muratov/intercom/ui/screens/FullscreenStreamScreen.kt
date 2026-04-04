@@ -2,6 +2,7 @@ package net.muratov.intercom.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,11 +15,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.video.RtspPlayer
@@ -45,6 +49,25 @@ fun FullscreenStreamScreen(
             muted = false,
             modifier = Modifier.fillMaxSize(),
         )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 0.78f), Color.Transparent),
+                    ),
+                )
+                .padding(horizontal = 24.dp, vertical = 24.dp),
+        ) {
+            Text(
+                text = stream.title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+            )
+        }
 
         if (onOpen != null && stream.openAction != null) {
             FloatingActionButton(

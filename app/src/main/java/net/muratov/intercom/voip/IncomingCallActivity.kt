@@ -7,7 +7,6 @@ import android.media.MediaPlayer
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,6 +17,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import net.muratov.intercom.databinding.ActivityIncomingCallBinding
+import net.muratov.intercom.logging.IntercomFileLogger
 import net.muratov.intercom.video.createRtspPlaybackView
 import net.muratov.intercom.video.playRtspOnView
 import net.muratov.intercom.video.releaseRtspPlaybackView
@@ -25,6 +25,10 @@ import org.linphone.core.Call
 import java.io.File
 
 class IncomingCallActivity : AppCompatActivity() {
+    companion object {
+        private const val TAG = "IncomingCallActivity"
+    }
+
     private lateinit var binding: ActivityIncomingCallBinding
 
     private var microphoneGranted = false
@@ -32,6 +36,7 @@ class IncomingCallActivity : AppCompatActivity() {
     private var incomingCallSound: IncomingCallSound? = null
     private var incomingCallSoundAccountId: String? = null
     private var previewPlaybackView: View? = null
+    private var previewRefreshRequestId: Long = 0L
 
     private val appContainer: net.muratov.intercom.AppContainer
         get() = (application as net.muratov.intercom.MainApplication).appContainer
@@ -52,6 +57,7 @@ class IncomingCallActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        IntercomFileLogger.i(TAG, "onCreate")
         setShowWhenLocked(true)
         setTurnScreenOn(true)
         binding = ActivityIncomingCallBinding.inflate(layoutInflater)
@@ -66,15 +72,18 @@ class IncomingCallActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        IntercomFileLogger.i(TAG, "onStart")
         SipCoreManager.addListener(coreListener)
     }
 
     override fun onResume() {
         super.onResume()
+        IntercomFileLogger.i(TAG, "onResume")
         refreshVideoWindows()
     }
 
     override fun onPause() {
+        IntercomFileLogger.i(TAG, "onPause")
         incomingCallSound?.stop()
         clearRemotePreviewPlayback()
         SipCoreManager.attachVideoWindows(null, null)
@@ -82,12 +91,14 @@ class IncomingCallActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        IntercomFileLogger.i(TAG, "onStop")
         incomingCallSound?.stop()
         SipCoreManager.removeListener(coreListener)
         super.onStop()
     }
 
     override fun onDestroy() {
+        IntercomFileLogger.i(TAG, "onDestroy")
         incomingCallSound?.release()
         incomingCallSound = null
         clearRemotePreviewPlayback()
@@ -96,17 +107,20 @@ class IncomingCallActivity : AppCompatActivity() {
 
     private fun setupListeners() {
         binding.answerButton.setOnClickListener {
+            IntercomFileLogger.i(TAG, "answerButton clicked accountId=${SipCoreManager.getCurrentCallAccountId()}")
             incomingCallSound?.stop()
             SipCoreManager.answerIncomingCall()
         }
 
         binding.hangupButton.setOnClickListener {
+            IntercomFileLogger.i(TAG, "hangupButton clicked accountId=${SipCoreManager.getCurrentCallAccountId()}")
             incomingCallSound?.stop()
             SipCoreManager.terminateCurrentCall()
         }
 
         binding.openButton.setOnClickListener {
             val accountId = SipCoreManager.getCurrentCallAccountId() ?: return@setOnClickListener
+            IntercomFileLogger.i(TAG, "openButton clicked accountId=$accountId")
             val action = appContainer.sipAccountRepository.accounts.value
                 .firstOrNull { it.id == accountId }
                 ?.openAction
@@ -118,13 +132,19 @@ class IncomingCallActivity : AppCompatActivity() {
     }
 
     private fun renderCall(snapshot: CallSnapshot?) {
+        IntercomFileLogger.d(
+            TAG,
+            "renderCall snapshotState=${snapshot?.state} remote=${snapshot?.remoteAddress} accountId=${SipCoreManager.getCurrentCallAccountId()}",
+        )
         if (snapshot == null) {
             incomingCallSound?.stop()
+            IntercomFileLogger.i(TAG, "renderCall snapshot is null, finishing activity")
             finish()
             return
         }
 
         ensureIncomingCallSoundForCurrentAccount()
+        renderProviderTitle()
 
         val incomingPending = snapshot.state == Call.State.IncomingReceived ||
                 snapshot.state == Call.State.IncomingEarlyMedia
@@ -141,6 +161,7 @@ class IncomingCallActivity : AppCompatActivity() {
                 appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == id }?.openAction
             }
             binding.openButton.visibility = if (openAction != null) View.VISIBLE else View.GONE
+            IntercomFileLogger.d(TAG, "renderCall active non-pending call openVisible=${openAction != null}")
             refreshVideoWindows()
             return
         }
@@ -157,9 +178,14 @@ class IncomingCallActivity : AppCompatActivity() {
             appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == id }?.openAction
         }
         binding.openButton.visibility = if (openAction != null) View.VISIBLE else View.GONE
+        IntercomFileLogger.d(
+            TAG,
+            "renderCall incomingPending=$incomingPending activeCall=$activeCall openVisible=${openAction != null}",
+        )
 
         if (!activeCall) {
             incomingCallSound?.stop()
+            IntercomFileLogger.i(TAG, "renderCall call is not active, finishing activity")
             finish()
             return
         }
@@ -167,38 +193,82 @@ class IncomingCallActivity : AppCompatActivity() {
         refreshVideoWindows()
     }
 
+    private fun renderProviderTitle() {
+        val accountId = SipCoreManager.getCurrentCallAccountId()
+        val providerTitle = accountId
+            ?.let { id -> appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == id } }
+            ?.title
+            .orEmpty()
+        binding.providerTitleText.text = providerTitle
+        binding.providerTitleText.visibility = if (providerTitle.isNotBlank()) View.VISIBLE else View.GONE
+        IntercomFileLogger.d(
+            TAG,
+            "renderProviderTitle accountId=${accountId ?: "<none>"} title=${providerTitle.ifBlank { "<none>" }}",
+        )
+    }
+
     private fun refreshVideoWindows() {
         val currentAccount = getCurrentAccount()
-        val previewRtspUrl = currentAccount?.incomingPreviewRtspUrl
-        if (!previewRtspUrl.isNullOrBlank()) {
-            binding.remoteVideoSurface.visibility = View.GONE
-            binding.remotePreviewContainer.visibility = View.VISIBLE
-            SipCoreManager.attachVideoWindows(null, null)
-            val playbackView = previewPlaybackView ?: createRtspPlaybackView(
-                context = this,
-                playbackEngine = currentAccount.incomingPreviewPlaybackEngine,
-            ).also { view ->
-                previewPlaybackView = view
-                binding.remotePreviewContainer.removeAllViews()
-                binding.remotePreviewContainer.addView(view)
-            }
-            playRtspOnView(
-                view = playbackView,
-                url = previewRtspUrl,
-                headers = currentAccount.incomingPreviewHeaders,
-                muted = true,
-            )
+        val requestId = ++previewRefreshRequestId
+        IntercomFileLogger.d(
+            TAG,
+            "refreshVideoWindows accountId=${currentAccount?.id ?: "<none>"} requestId=$requestId",
+        )
+        if (currentAccount == null) {
+            clearRemotePreviewPlayback()
+            binding.remotePreviewContainer.visibility = View.GONE
+            binding.remoteVideoSurface.visibility = View.VISIBLE
+            IntercomFileLogger.i(TAG, "No current account, binding SIP video surface instead")
+            SipCoreManager.attachVideoWindows(binding.remoteVideoSurface, null)
             return
         }
+        lifecycleScope.launch {
+            val preview = appContainer.sipAccountRepository.resolveIncomingPreview(currentAccount.id)
+            if (requestId != previewRefreshRequestId) {
+                IntercomFileLogger.d(
+                    TAG,
+                    "Ignoring stale preview resolution accountId=${currentAccount.id} requestId=$requestId latestRequestId=$previewRefreshRequestId",
+                )
+                return@launch
+            }
+            IntercomFileLogger.d(
+                TAG,
+                "refreshVideoWindows resolved accountId=${currentAccount.id} previewRtspUrl=${preview?.rtspUrl ?: "<none>"} headers=${preview?.headers?.keys ?: emptySet<String>()}",
+            )
+            if (preview != null) {
+                binding.remoteVideoSurface.visibility = View.GONE
+                binding.remotePreviewContainer.visibility = View.VISIBLE
+                SipCoreManager.attachVideoWindows(null, null)
+                val playbackView = previewPlaybackView ?: createRtspPlaybackView(
+                    context = this@IncomingCallActivity,
+                    playbackEngine = preview.playbackEngine,
+                ).also { view ->
+                    previewPlaybackView = view
+                    binding.remotePreviewContainer.removeAllViews()
+                    binding.remotePreviewContainer.addView(view)
+                    IntercomFileLogger.i(TAG, "Created RTSP preview playback view engine=${preview.playbackEngine}")
+                }
+                playRtspOnView(
+                    view = playbackView,
+                    url = preview.rtspUrl,
+                    headers = preview.headers,
+                    muted = true,
+                )
+                IntercomFileLogger.i(TAG, "Started RTSP preview url=${preview.rtspUrl}")
+                return@launch
+            }
 
-        clearRemotePreviewPlayback()
-        binding.remotePreviewContainer.visibility = View.GONE
-        binding.remoteVideoSurface.visibility = View.VISIBLE
-        SipCoreManager.attachVideoWindows(binding.remoteVideoSurface, null)
+            clearRemotePreviewPlayback()
+            binding.remotePreviewContainer.visibility = View.GONE
+            binding.remoteVideoSurface.visibility = View.VISIBLE
+            IntercomFileLogger.i(TAG, "No live RTSP preview, binding SIP video surface instead")
+            SipCoreManager.attachVideoWindows(binding.remoteVideoSurface, null)
+        }
     }
 
     private fun clearRemotePreviewPlayback() {
         previewPlaybackView?.let { view ->
+            IntercomFileLogger.i(TAG, "Releasing RTSP preview playback view")
             releaseRtspPlaybackView(view)
             binding.remotePreviewContainer.removeView(view)
         }
@@ -225,15 +295,22 @@ class IncomingCallActivity : AppCompatActivity() {
     private fun ensureIncomingCallSoundForCurrentAccount() {
         val accountId = SipCoreManager.getCurrentCallAccountId()
         if (incomingCallSound != null && incomingCallSoundAccountId == accountId) {
+            IntercomFileLogger.d(TAG, "Incoming call sound already matches accountId=$accountId")
             return
         }
         incomingCallSound?.release()
         incomingCallSoundAccountId = accountId
+        IntercomFileLogger.i(TAG, "Resolving incoming call sound for accountId=$accountId")
         incomingCallSound = resolveIncomingCallSoundForAccount(accountId)
     }
 
     private fun getCurrentAccount() = SipCoreManager.getCurrentCallAccountId()?.let { accountId ->
         appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == accountId }
+    }.also { account ->
+        IntercomFileLogger.d(
+            TAG,
+            "getCurrentAccount resolved accountId=${account?.id ?: "<none>"}",
+        )
     }
 
     private fun resolveIncomingCallSoundForAccount(accountId: String?): IncomingCallSound? {
@@ -241,21 +318,21 @@ class IncomingCallActivity : AppCompatActivity() {
             appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == id }?.ringtoneAsset
         }
         if (ringtoneAsset.isNullOrBlank()) {
-            Log.d("IncomingCallActivity", "No ringtoneAsset configured for account=$accountId")
+            IntercomFileLogger.d(TAG, "No ringtoneAsset configured for account=$accountId")
             return null
         }
         if (!ringtoneAsset.endsWith(".mp3", ignoreCase = true)) {
-            Log.w(
-                "IncomingCallActivity",
+            IntercomFileLogger.w(
+                TAG,
                 "ringtoneAsset must point to an mp3 file, got=$ringtoneAsset for account=$accountId",
             )
             return null
         }
         return createAssetSound(ringtoneAsset)?.also {
-            Log.d("IncomingCallActivity", "Using mp3 ringtoneAsset=$ringtoneAsset for account=$accountId")
+            IntercomFileLogger.i(TAG, "Using mp3 ringtoneAsset=$ringtoneAsset for account=$accountId")
         } ?: run {
-            Log.w(
-                "IncomingCallActivity",
+            IntercomFileLogger.w(
+                TAG,
                 "Failed to load mp3 ringtoneAsset=$ringtoneAsset for account=$accountId",
             )
             null
@@ -269,8 +346,11 @@ class IncomingCallActivity : AppCompatActivity() {
                 dataSourcePath = cacheFile.absolutePath,
                 cleanup = { cacheFile.delete() },
             )
+        }.onFailure { error ->
+            IntercomFileLogger.w(TAG, "Failed to create sound from assets path=$assetPath", error)
         }.getOrNull()
         if (assetSound != null) {
+            IntercomFileLogger.i(TAG, "Created sound from bundled asset path=$assetPath")
             return assetSound
         }
 
@@ -281,11 +361,14 @@ class IncomingCallActivity : AppCompatActivity() {
             ?: return null
         val candidateFile = File(configDirectory, assetPath)
         if (!candidateFile.isFile) {
+            IntercomFileLogger.w(TAG, "Ringtone file not found in config directory path=${candidateFile.absolutePath}")
             return null
         }
 
         return runCatching {
             createMediaPlayerSound(dataSourcePath = candidateFile.absolutePath)
+        }.onFailure { error ->
+            IntercomFileLogger.w(TAG, "Failed to create sound from config file path=${candidateFile.absolutePath}", error)
         }.getOrNull()
     }
 
@@ -300,6 +383,7 @@ class IncomingCallActivity : AppCompatActivity() {
                 input.copyTo(output)
             }
         }
+        IntercomFileLogger.d(TAG, "Copied ringtone asset=$assetPath to cache=${cacheFile.absolutePath}")
         return cacheFile
     }
 
@@ -318,6 +402,7 @@ class IncomingCallActivity : AppCompatActivity() {
             isLooping = true
             prepare()
         }
+        IntercomFileLogger.d(TAG, "Prepared MediaPlayer dataSourcePath=$dataSourcePath")
         return MediaPlayerIncomingCallSound(
             mediaPlayer = mediaPlayer,
             cleanup = cleanup,
@@ -345,6 +430,7 @@ class IncomingCallActivity : AppCompatActivity() {
     private fun updateGrantedPermissions() {
         microphoneGranted = hasPermission(Manifest.permission.RECORD_AUDIO)
         cameraGranted = hasPermission(Manifest.permission.CAMERA)
+        IntercomFileLogger.i(TAG, "updateGrantedPermissions microphone=$microphoneGranted camera=$cameraGranted")
     }
 
     private fun hasPermission(permission: String): Boolean {

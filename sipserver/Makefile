@@ -4,8 +4,7 @@ BIN_DIR := ./bin
 BIN := $(BIN_DIR)/$(APP)
 BIN_LINUX_AMD64 := $(BIN_DIR)/$(APP)-linux-amd64
 GOCACHE ?= /tmp/gocache
-GOPATH ?= /tmp/gopath
-GOENV := GOCACHE=$(GOCACHE) GOPATH=$(GOPATH)
+GOENV := GOCACHE=$(GOCACHE)
 VERSION ?= 0.1.0
 TARGET_OS ?= linux
 TARGET_ARCH ?= arm64

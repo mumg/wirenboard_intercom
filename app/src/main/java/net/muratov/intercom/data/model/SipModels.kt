@@ -32,6 +32,12 @@ data class SipAccountConfig(
     val openAction: ProviderOpenAction? = null,
 )
 
+data class SipIncomingPreview(
+    val rtspUrl: String,
+    val headers: Map<String, String> = emptyMap(),
+    val playbackEngine: StreamPlaybackEngine = StreamPlaybackEngine.EXO_PLAYER,
+)
+
 data class SipAccountState(
     val config: SipAccountConfig,
     val status: SipRegistrationStatus = SipRegistrationStatus.Idle,
