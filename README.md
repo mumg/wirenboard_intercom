@@ -1,5 +1,9 @@
 # Конфигурация `app_config.json`
 
+## Скриншот
+
+![Скриншот приложения](docs/screen.png)
+
 Файл конфигурации находится здесь:
 
 `/sdcard/Android/data/net.muratov.intercom/files/app_config.json`
