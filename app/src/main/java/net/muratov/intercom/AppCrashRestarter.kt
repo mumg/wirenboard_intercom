@@ -6,19 +6,28 @@ import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
 import android.util.Log
+import net.muratov.intercom.logging.IntercomFileLogger
 
 object AppCrashRestarter {
     private const val TAG = "AppCrashRestarter"
     private const val RESTART_DELAY_MS = 1_500L
+    internal const val ACTION_RESTART_APP = "net.muratov.intercom.action.RESTART_APP"
 
     fun install(context: Context) {
         val appContext = context.applicationContext
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        IntercomFileLogger.i(TAG, "Installing uncaught exception handler previousHandler=${previousHandler?.javaClass?.name}")
 
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            IntercomFileLogger.e(
+                TAG,
+                "Uncaught exception received thread=${thread.name}, scheduling app restart",
+                throwable,
+            )
             runCatching {
                 scheduleRestart(appContext)
             }.onFailure { error ->
+                IntercomFileLogger.e(TAG, "Unable to schedule app restart after crash", error)
                 Log.e(TAG, "Unable to schedule app restart after crash", error)
             }
 
@@ -32,13 +41,11 @@ object AppCrashRestarter {
     }
 
     private fun scheduleRestart(context: Context) {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            putExtra("restart_after_crash", true)
+        val intent = Intent(context, CrashRestartReceiver::class.java).apply {
+            action = ACTION_RESTART_APP
+            `package` = context.packageName
         }
-        val pendingIntent = PendingIntent.getActivity(
+        val pendingIntent = PendingIntent.getBroadcast(
             context,
             1001,
             intent,
@@ -47,8 +54,9 @@ object AppCrashRestarter {
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val triggerAtMillis = SystemClock.elapsedRealtime() + RESTART_DELAY_MS
-        alarmManager.set(
-            AlarmManager.ELAPSED_REALTIME,
+        IntercomFileLogger.i(TAG, "Scheduling restart triggerAtElapsed=$triggerAtMillis delayMs=$RESTART_DELAY_MS")
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
             triggerAtMillis,
             pendingIntent,
         )

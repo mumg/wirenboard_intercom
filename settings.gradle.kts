@@ -2,7 +2,6 @@ pluginManagement {
     repositories {
         google()
         mavenCentral()
-        maven("https://maven.mozilla.org/maven2/")
         maven("https://download.linphone.org/releases/android/maven_repository")
         maven("https://download.linphone.org/releases/maven_repository")
         gradlePluginPortal()
@@ -14,7 +13,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven("https://maven.mozilla.org/maven2/")
         maven("https://download.linphone.org/releases/android/maven_repository")
         maven("https://download.linphone.org/releases/maven_repository")
     }

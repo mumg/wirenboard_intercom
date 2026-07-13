@@ -84,7 +84,6 @@ configurations.configureEach {
 
 dependencies {
     val composeUiVersion = "1.6.8"
-    val geckoViewVersion = "147.0.20260212191108"
     val media3Version = "1.4.1"
 
     constraints {
@@ -129,7 +128,6 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-rtsp:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
     implementation("org.videolan.android:libvlc-all:3.6.5")
-    implementation("org.mozilla.geckoview:geckoview:$geckoViewVersion")
     implementation("org.linphone:linphone-sdk-android:5.4.97")
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 

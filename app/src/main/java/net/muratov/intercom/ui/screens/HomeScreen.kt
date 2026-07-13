@@ -1,8 +1,16 @@
 package net.muratov.intercom.ui.screens
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,12 +50,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import net.muratov.intercom.browser.GeckoRuntimeHolder
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.video.RtspPlayer
-import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoView
-import org.mozilla.geckoview.WebRequestError
 import android.graphics.Color as AndroidColor
 
 @Composable
@@ -78,7 +82,7 @@ fun HomeScreen(
             ),
     ) {
         if (!hasStreams) {
-            GeckoPane(
+            WebPane(
                 webViewUrl = webViewUrl,
                 browserVisible = browserVisible,
                 modifier = Modifier
@@ -92,7 +96,7 @@ fun HomeScreen(
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                GeckoPane(
+                WebPane(
                     webViewUrl = webViewUrl,
                     browserVisible = browserVisible,
                     modifier = Modifier
@@ -111,7 +115,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun GeckoPane(
+private fun WebPane(
     webViewUrl: String,
     browserVisible: Boolean,
     modifier: Modifier = Modifier,
@@ -132,7 +136,7 @@ private fun GeckoPane(
                     .fillMaxSize()
                     .then(if (fullscreen) Modifier else Modifier.clip(RoundedCornerShape(26.dp))),
                 factory = { context ->
-                    GeckoBrowserView(context).apply {
+                    AppWebViewContainer(context).apply {
                         bindUrl(webViewUrl)
                         setBrowserVisible(browserVisible)
                     }
@@ -146,16 +150,15 @@ private fun GeckoPane(
     }
 }
 
-private class GeckoBrowserView(context: Context) : FrameLayout(context) {
+@SuppressLint("SetJavaScriptEnabled")
+private class AppWebViewContainer(context: Context) : FrameLayout(context) {
     companion object {
         private const val RETRY_DELAY_MS = 15_000L
     }
 
-    private val geckoView = GeckoView(context)
-    private val geckoSession = GeckoSession()
+    private val webView = WebView(context)
     private val retryLoadRunnable = Runnable { retryLoadIfNeeded() }
     private var currentUrl: String? = null
-    private var opened = false
     private var pageLoadedSuccessfully = false
     private var browserVisible = true
 
@@ -165,40 +168,58 @@ private class GeckoBrowserView(context: Context) : FrameLayout(context) {
             ViewGroup.LayoutParams.MATCH_PARENT,
         )
         setBackgroundColor(AndroidColor.WHITE)
-        geckoView.layoutParams = LayoutParams(
+        webView.layoutParams = LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
         )
-        geckoView.setBackgroundColor(AndroidColor.WHITE)
-        addView(geckoView)
+        webView.setBackgroundColor(AndroidColor.WHITE)
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            mediaPlaybackRequiresUserGesture = false
+            cacheMode = WebSettings.LOAD_DEFAULT
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        }
+        webView.isHorizontalScrollBarEnabled = false
+        webView.isVerticalScrollBarEnabled = false
+        webView.webChromeClient = WebChromeClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                pageLoadedSuccessfully = false
+                cancelRetry()
+            }
 
-        geckoSession.setNavigationDelegate(
-            object : GeckoSession.NavigationDelegate {
-                override fun onLoadError(
-                    session: GeckoSession,
-                    uri: String?,
-                    error: WebRequestError,
-                ) = null.also {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                pageLoadedSuccessfully = true
+                cancelRetry()
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?,
+            ) {
+                if (request?.isForMainFrame == true) {
                     pageLoadedSuccessfully = false
                     scheduleRetry()
                 }
-            },
-        )
-        geckoSession.setProgressDelegate(
-            object : GeckoSession.ProgressDelegate {
-                override fun onPageStop(session: GeckoSession, success: Boolean) {
-                    pageLoadedSuccessfully = success
-                    if (success) {
-                        cancelRetry()
-                    } else {
-                        scheduleRetry()
-                    }
-                }
-            },
-        )
-        geckoSession.open(GeckoRuntimeHolder.getOrCreate(context))
-        geckoView.setSession(geckoSession)
-        opened = true
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onReceivedError(
+                view: WebView?,
+                errorCode: Int,
+                description: String?,
+                failingUrl: String?,
+            ) {
+                pageLoadedSuccessfully = false
+                scheduleRetry()
+            }
+        }
+        addView(webView)
     }
 
     fun bindUrl(url: String) {
@@ -207,9 +228,14 @@ private class GeckoBrowserView(context: Context) : FrameLayout(context) {
         currentUrl = targetUrl
         pageLoadedSuccessfully = targetUrl == "about:blank"
         cancelRetry()
-        geckoSession.loadUri(targetUrl)
-        if (!pageLoadedSuccessfully) {
-            scheduleRetry()
+        if (targetUrl == "about:blank") {
+            webView.loadUrl(targetUrl)
+        } else {
+            webView.stopLoading()
+            webView.loadUrl(targetUrl)
+            if (!pageLoadedSuccessfully) {
+                scheduleRetry()
+            }
         }
     }
 
@@ -217,29 +243,37 @@ private class GeckoBrowserView(context: Context) : FrameLayout(context) {
         browserVisible = visible
         val visibility = if (visible) View.VISIBLE else View.INVISIBLE
         this.visibility = visibility
-        geckoView.visibility = visibility
-        if (visible && !pageLoadedSuccessfully && !currentUrl.isNullOrBlank()) {
-            scheduleRetry()
-        } else if (!visible) {
+        webView.visibility = visibility
+        if (visible) {
+            webView.onResume()
+            webView.resumeTimers()
+            if (!pageLoadedSuccessfully && !currentUrl.isNullOrBlank()) {
+                scheduleRetry()
+            }
+        } else {
             cancelRetry()
+            webView.onPause()
+            webView.pauseTimers()
         }
     }
 
     override fun onDetachedFromWindow() {
         cancelRetry()
-        if (opened && geckoSession.isOpen) {
-            geckoSession.close()
-            opened = false
-        }
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        webView.onPause()
+        webView.removeAllViews()
+        webView.destroy()
         super.onDetachedFromWindow()
     }
 
     private fun retryLoadIfNeeded() {
         val targetUrl = currentUrl
-        if (!opened || !browserVisible || pageLoadedSuccessfully || targetUrl.isNullOrBlank() || targetUrl == "about:blank") {
+        if (!browserVisible || pageLoadedSuccessfully || targetUrl.isNullOrBlank() || targetUrl == "about:blank") {
             return
         }
-        geckoSession.loadUri(targetUrl)
+        webView.stopLoading()
+        webView.loadUrl(targetUrl)
         scheduleRetry()
     }
 

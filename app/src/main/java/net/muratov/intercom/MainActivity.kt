@@ -96,6 +96,14 @@ private fun IntercomApp(
     var isFullscreenStreamLoading by remember { mutableStateOf(false) }
     val showConfigRequired = !uiState.isConfigValid
     val showWizard = uiState.proptechWizardRequired && !uiState.canEnterMainUi
+    val shouldConsumeBack =
+        selectedStreamId == null &&
+            uiState.contextSelectionPrompt == null &&
+            uiState.verificationPrompt == null
+
+    BackHandler(enabled = shouldConsumeBack) {
+        // Keep the launcher on screen when the app is used as HOME.
+    }
 
     DisposableEffect(activity, view) {
         val window = activity?.window
