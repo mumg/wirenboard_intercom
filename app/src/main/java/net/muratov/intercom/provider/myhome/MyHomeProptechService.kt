@@ -3,6 +3,7 @@ package net.muratov.intercom.provider.myhome
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
+import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +22,13 @@ import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.nio.charset.Charset
+import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MyHomeProptechService(
     private val context: Context,
@@ -31,8 +39,10 @@ class MyHomeProptechService(
         private const val TAG = "MyHomeProptechService"
         private const val HTTP_TAG = "IntercomHttpProptech"
         private const val PROPTECH_APP_ID = "erth"
-        private const val PROPTECH_APP_VERSION_NAME = "8.7.1"
-        private const val PROPTECH_APP_VERSION_CODE = "8070101"
+        private const val PROPTECH_APP_VERSION_NAME = "9.10.0"
+        private const val PROPTECH_APP_VERSION_CODE = "91000020"
+        private const val PROPTECH_PASSWORD_HASH_PREFIX = "DigitalHomeNTKpassword"
+        private const val PROPTECH_AUTH_SECRET = "789sdgHJs678wertv34712376"
         private const val PREFS_NAME = "proptech_auth"
         private const val KEY_TOKEN_TYPE = "token_type"
         private const val KEY_ACCESS_TOKEN = "access_token"
@@ -42,6 +52,7 @@ class MyHomeProptechService(
         private const val KEY_OPERATOR_ID = "operator_id"
         private const val KEY_OPERATOR_NAME = "operator_name"
         private const val KEY_SELECTED_PLACE_ID = "selected_place_id"
+        private const val KEY_LOGIN = "login"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -66,48 +77,64 @@ class MyHomeProptechService(
 
     private var selectedContext: MyHomeLoginContext? = null
     private var tokens: MyHomeTokens? = restoredSession?.tokens
+    private val authenticationInProgress = AtomicBoolean(false)
 
     override fun start() {
-        if (!config.enabled || config.phone.isBlank()) {
-            _state.value = MyHomeProviderState(status = MyHomeAuthStatus.Disabled)
+        if (!config.enabled || (!config.hasPasswordCredentials && config.phone.isBlank())) {
+            _state.value = MyHomeProviderState(
+                status = MyHomeAuthStatus.Disabled,
+                message = "Укажите phone либо accountId и password в конфиге Proptech",
+            )
             return
         }
 
         if (_state.value.status == MyHomeAuthStatus.Authorized ||
             _state.value.status == MyHomeAuthStatus.WaitingForCode ||
-            _state.value.status == MyHomeAuthStatus.SelectingContext
+            _state.value.status == MyHomeAuthStatus.SelectingContext ||
+            _state.value.status == MyHomeAuthStatus.RequestingCode ||
+            _state.value.status == MyHomeAuthStatus.Authorizing
         ) {
             return
         }
+        if (!authenticationInProgress.compareAndSet(false, true)) return
 
         scope.launch {
-            _state.value = _state.value.copy(
-                status = MyHomeAuthStatus.RequestingCode,
-                message = "Запрашиваем код подтверждения",
-            )
-
-            runCatching {
-                val contexts = getLoginContextsByPhone(config.phone)
-                when {
-                    contexts.isEmpty() -> error("Для номера не найден подходящий контекст авторизации")
-                    contexts.size == 1 -> beginPhoneConfirmation(contexts.first())
-                    else -> {
-                        _state.value = MyHomeProviderState(
-                            status = MyHomeAuthStatus.SelectingContext,
-                            contextSelectionPrompt = MyHomeContextSelectionPrompt(
-                                phone = config.phone,
-                                contexts = contexts,
-                            ),
-                            message = "Выберите адрес для авторизации",
-                        )
-                    }
+            try {
+                if (config.hasPasswordCredentials) {
+                    authorizeWithPassword()
+                    return@launch
                 }
-            }.onFailure { error ->
-                Log.e(TAG, "Unable to start verification flow", error)
+
                 _state.value = _state.value.copy(
-                    status = MyHomeAuthStatus.Error,
-                    message = error.message.orEmpty(),
+                    status = MyHomeAuthStatus.RequestingCode,
+                    message = "Запрашиваем код подтверждения",
                 )
+
+                runCatching {
+                    val contexts = getLoginContexts(config.phone)
+                    when {
+                        contexts.isEmpty() -> error("Для номера не найден подходящий контекст авторизации")
+                        contexts.size == 1 -> beginPhoneConfirmation(contexts.first())
+                        else -> {
+                            _state.value = MyHomeProviderState(
+                                status = MyHomeAuthStatus.SelectingContext,
+                                contextSelectionPrompt = MyHomeContextSelectionPrompt(
+                                    phone = config.phone,
+                                    contexts = contexts,
+                                ),
+                                message = "Выберите адрес для авторизации",
+                            )
+                        }
+                    }
+                }.onFailure { error ->
+                    Log.e(TAG, "Unable to start verification flow", error)
+                    _state.value = _state.value.copy(
+                        status = MyHomeAuthStatus.Error,
+                        message = error.message.orEmpty(),
+                    )
+                }
+            } finally {
+                authenticationInProgress.set(false)
             }
         }
     }
@@ -159,17 +186,13 @@ class MyHomeProptechService(
             )
 
             runCatching {
-                val issuedTokens = confirmAuth(context, code, confirmationSecret)
-                tokens = issuedTokens
-                persistSession(issuedTokens, context.placeId)
-                _state.value = MyHomeProviderState(
-                    status = MyHomeAuthStatus.Authorized,
-                    contextSelectionPrompt = null,
-                    verificationPrompt = null,
-                    tokens = issuedTokens,
-                    selectedPlaceId = context.placeId,
-                    message = "Авторизация выполнена",
+                val issuedTokens = confirmAuth(
+                    loginContext = context,
+                    login = config.phone,
+                    confirmation = code,
+                    confirmationSecret = confirmationSecret,
                 )
+                completeAuthorization(issuedTokens, context.placeId, config.phone)
             }.onFailure { error ->
                 Log.e(TAG, "Unable to confirm verification code", error)
                 _state.value = _state.value.copy(
@@ -206,12 +229,14 @@ class MyHomeProptechService(
         }
     }
 
-    override suspend fun getLoginContextsByPhone(phone: String): List<MyHomeLoginContext> {
-        val targetPhone = phone.ifBlank { config.phone }
-        require(targetPhone.isNotBlank()) { "Phone is not configured" }
-        val encodedPhone = targetPhone.urlEncode()
+    override suspend fun getLoginContexts(login: String): List<MyHomeLoginContext> {
+        val targetLogin = login.ifBlank {
+            if (config.hasPasswordCredentials) config.accountId else config.phone
+        }
+        require(targetLogin.isNotBlank()) { "Proptech login is not configured" }
+        val encodedLogin = targetLogin.urlEncode()
         val response = requestJson(
-            path = "/auth/v2/login/$encodedPhone",
+            path = "/auth/v2/login/$encodedLogin",
             method = "GET",
             expectedCodes = setOf(HttpURLConnection.HTTP_OK, HttpURLConnection.HTTP_MULT_CHOICE),
         )
@@ -424,21 +449,22 @@ class MyHomeProptechService(
 
     private suspend fun confirmAuth(
         loginContext: MyHomeLoginContext,
-        code: String,
+        login: String,
+        confirmation: String,
         confirmationSecret: String,
     ): MyHomeTokens {
-        val confirm2 = confirmationSecret.takeIf { it.isNotBlank() } ?: code
+        val confirm2 = confirmationSecret.takeIf { it.isNotBlank() } ?: confirmation
         val body = JSONObject().apply {
             put("operatorId", loginContext.operatorId)
-            put("login", config.phone)
+            put("login", login)
             put("accountId", loginContext.accountId)
             put("profileId", loginContext.profileId)
-            put("confirm1", code)
+            put("confirm1", confirmation)
             put("confirm2", confirm2)
             put("subscriberId", loginContext.subscriberId)
         }
         val json = requestJson(
-            path = "/auth/v3/auth/${config.phone.urlEncode()}/confirmation",
+            path = "/auth/v3/auth/${login.urlEncode()}/confirmation",
             method = "POST",
             body = body.toString(),
         ).asObject()
@@ -450,6 +476,98 @@ class MyHomeProptechService(
             refreshExpiresIn = json.optLongOrNull("refreshExpiresIn"),
             operatorId = json.optIntOrNull("operatorId"),
             operatorName = json.optString("operatorName").takeIf { it.isNotBlank() },
+        )
+    }
+
+    private suspend fun authorizeWithPassword() {
+        _state.value = MyHomeProviderState(
+            status = MyHomeAuthStatus.Authorizing,
+            message = "Авторизация по номеру аккаунта",
+        )
+
+        runCatching {
+            val login = config.accountId.trim()
+            val issuedTokens = authenticateWithPassword(login, config.password)
+            tokens = issuedTokens
+            val placeId = try {
+                getSubscriberPlaces().firstOrNull()?.placeId
+                    ?: error("Для аккаунта не найден доступный адрес")
+            } catch (error: Throwable) {
+                tokens = null
+                throw error
+            }
+            completeAuthorization(issuedTokens, placeId, login)
+        }.onFailure { error ->
+            Log.e(TAG, "Unable to authorize with Proptech account credentials", error)
+            _state.value = MyHomeProviderState(
+                status = MyHomeAuthStatus.Error,
+                message = error.message ?: "Не удалось авторизоваться по номеру аккаунта",
+            )
+        }
+    }
+
+    private suspend fun authenticateWithPassword(login: String, password: String): MyHomeTokens {
+        val now = Date()
+        val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(now)
+        val compactTimestamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(now)
+        val hash1 = Base64.encodeToString(
+            MessageDigest.getInstance("SHA-1").digest(
+                password.toByteArray(Charset.forName("ISO-8859-1")),
+            ),
+            Base64.NO_WRAP,
+        )
+        val hash2Source = buildString {
+            append(PROPTECH_PASSWORD_HASH_PREFIX)
+            append(login)
+            append(password)
+            append(compactTimestamp)
+            append(PROPTECH_AUTH_SECRET)
+        }
+        val hash2 = MessageDigest.getInstance("MD5")
+            .digest(hash2Source.toByteArray(Charsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        val body = JSONObject().apply {
+            put("login", login)
+            put("timestamp", timestamp)
+            put("hash1", hash1)
+            put("hash2", hash2)
+        }
+        val json = requestJson(
+            path = "/auth/v2/auth/${login.urlEncode()}/password",
+            method = "POST",
+            body = body.toString(),
+        ).asObject()
+        return MyHomeTokens(
+            tokenType = json.optString("tokenType", "Bearer"),
+            accessToken = json.optString("accessToken"),
+            refreshToken = json.optString("refreshToken"),
+            expiresIn = json.optLongOrNull("expiresIn"),
+            refreshExpiresIn = json.optLongOrNull("refreshExpiresIn"),
+            operatorId = json.optIntOrNull("operatorId"),
+            operatorName = json.optString("operatorName").takeIf { it.isNotBlank() },
+        ).also { issuedTokens ->
+            require(issuedTokens.accessToken.isNotBlank()) { "Сервер не вернул токен авторизации" }
+        }
+    }
+
+    private fun completeAuthorization(
+        issuedTokens: MyHomeTokens,
+        placeId: Long,
+        login: String,
+    ) {
+        tokens = issuedTokens
+        persistSession(issuedTokens, placeId, login)
+        _state.value = MyHomeProviderState(
+            status = MyHomeAuthStatus.Authorized,
+            contextSelectionPrompt = null,
+            verificationPrompt = null,
+            tokens = issuedTokens,
+            selectedPlaceId = placeId,
+            message = "Авторизация выполнена",
         )
     }
 
@@ -542,8 +660,7 @@ class MyHomeProptechService(
     ): HttpURLConnection {
         val url = URL("$baseUrl$path")
         val operatorIdHeader = tokens?.operatorId?.takeIf {
-            (path.startsWith("/rest/v1/places/") && path.endsWith("/cameras")) ||
-                path.startsWith("/rest/v1/forpost/cameras/") && path.contains("/video")
+            bearerToken != null && !path.startsWith("/rest/v3/subscriber-places")
         }
         return (url.openConnection() as HttpURLConnection).apply {
             requestMethod = method
@@ -579,7 +696,7 @@ class MyHomeProptechService(
                 if (!body.isNullOrBlank()) {
                     append('\n')
                     append("body=")
-                    append(body)
+                    append(body.sanitizedJsonForLog())
                 }
             },
         )
@@ -609,7 +726,7 @@ class MyHomeProptechService(
                 if (body.isNotBlank()) {
                     append('\n')
                     append("body=")
-                    append(body)
+                    append(body.sanitizedJsonForLog())
                 }
             },
         )
@@ -674,7 +791,7 @@ class MyHomeProptechService(
         }
     }
 
-    private fun persistSession(tokens: MyHomeTokens, selectedPlaceId: Long) {
+    private fun persistSession(tokens: MyHomeTokens, selectedPlaceId: Long, login: String) {
         preferences.edit()
             .putString(KEY_TOKEN_TYPE, tokens.tokenType)
             .putString(KEY_ACCESS_TOKEN, tokens.accessToken)
@@ -684,6 +801,7 @@ class MyHomeProptechService(
             .putInt(KEY_OPERATOR_ID, tokens.operatorId ?: -1)
             .putString(KEY_OPERATOR_NAME, tokens.operatorName.orEmpty())
             .putLong(KEY_SELECTED_PLACE_ID, selectedPlaceId)
+            .putString(KEY_LOGIN, login)
             .apply()
     }
 
@@ -693,7 +811,18 @@ class MyHomeProptechService(
         val refreshToken = preferences.getString(KEY_REFRESH_TOKEN, null).orEmpty()
         val tokenType = preferences.getString(KEY_TOKEN_TYPE, null).orEmpty()
         val selectedPlaceId = preferences.getLong(KEY_SELECTED_PLACE_ID, -1L)
+        val persistedLogin = preferences.getString(KEY_LOGIN, null).orEmpty()
+        val configuredLogin = if (config.hasPasswordCredentials) config.accountId else config.phone
         if (accessToken.isBlank() || refreshToken.isBlank() || tokenType.isBlank() || selectedPlaceId <= 0L) {
+            return null
+        }
+        if (config.hasPasswordCredentials && !persistedLogin.equals(configuredLogin, ignoreCase = true)) {
+            return null
+        }
+        if (persistedLogin.isNotBlank() &&
+            configuredLogin.isNotBlank() &&
+            !persistedLogin.equals(configuredLogin, ignoreCase = true)
+        ) {
             return null
         }
         return PersistedSession(
@@ -718,6 +847,11 @@ class MyHomeProptechService(
             status = if (config.enabled) MyHomeAuthStatus.Idle else MyHomeAuthStatus.Disabled,
             message = message,
         )
+        if (config.enabled && config.hasPasswordCredentials) {
+            // Configured credentials can renew an expired session without any
+            // user interaction. The SMS branch intentionally stays manual.
+            start()
+        }
     }
 }
 
@@ -740,6 +874,52 @@ private fun JSONArray?.toList(): List<Any?> {
 
 private fun String.urlEncode(): String = URLEncoder.encode(this, Charsets.UTF_8.name())
 
+private fun String.sanitizedJsonForLog(): String {
+    return runCatching {
+        when {
+            trimStart().startsWith("{") -> JSONObject(this).sanitizedForLog().toString()
+            trimStart().startsWith("[") -> JSONArray(this).sanitizedForLog().toString()
+            else -> this
+        }
+    }.getOrDefault("<invalid JSON omitted>")
+}
+
+private fun JSONObject.sanitizedForLog(): JSONObject {
+    val sanitized = JSONObject()
+    keys().forEach { key ->
+        val value = opt(key)
+        sanitized.put(
+            key,
+            if (key.lowercase() in SENSITIVE_JSON_KEYS) "<redacted>" else value.sanitizedForLog(),
+        )
+    }
+    return sanitized
+}
+
+private fun JSONArray.sanitizedForLog(): JSONArray {
+    val sanitized = JSONArray()
+    for (index in 0 until length()) {
+        sanitized.put(opt(index).sanitizedForLog())
+    }
+    return sanitized
+}
+
+private fun Any?.sanitizedForLog(): Any? = when (this) {
+    is JSONObject -> sanitizedForLog()
+    is JSONArray -> sanitizedForLog()
+    else -> this
+}
+
+private val SENSITIVE_JSON_KEYS = setOf(
+    "password",
+    "hash1",
+    "hash2",
+    "confirm1",
+    "confirm2",
+    "accesstoken",
+    "refreshtoken",
+)
+
 private fun JSONObject.optLongOrNull(key: String): Long? {
     return if (isNull(key)) null else optLong(key)
 }
@@ -752,10 +932,11 @@ private fun Map<String, List<String>?>.sanitizedHeaders(): Map<String, List<Stri
     return entries.associate { (key, values) ->
         val safeKey = key.orEmpty()
         val safeValues = values.orEmpty().map { value ->
-            if (safeKey.equals("Authorization", ignoreCase = true)) {
-                value.take(24) + "..."
-            } else {
-                value
+            when {
+                safeKey.equals("Authorization", ignoreCase = true) -> "<redacted>"
+                safeKey.equals("Cookie", ignoreCase = true) -> "<redacted>"
+                safeKey.equals("Set-Cookie", ignoreCase = true) -> "<redacted>"
+                else -> value
             }
         }
         safeKey to safeValues

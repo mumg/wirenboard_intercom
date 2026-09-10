@@ -6,6 +6,7 @@ import net.muratov.intercom.data.model.SipIncomingPreview
 import net.muratov.intercom.data.model.SipAccountSourceConfig
 import net.muratov.intercom.data.model.SipTransport
 import net.muratov.intercom.data.model.StreamPlaybackEngine
+import net.muratov.intercom.data.repository.ProptechPlaceCatalog
 import net.muratov.intercom.logging.IntercomFileLogger
 import net.muratov.intercom.provider.myhome.MyHomeAccessControl
 import net.muratov.intercom.provider.myhome.MyHomeCameraResource
@@ -13,6 +14,7 @@ import net.muratov.intercom.provider.myhome.MyHomeProviderService
 
 class ProptechSipAccountDataProvider(
     private val providerService: MyHomeProviderService,
+    private val placeCatalog: ProptechPlaceCatalog,
 ) : IntercomProvider {
     override val type: String = "proptech"
 
@@ -36,11 +38,14 @@ class ProptechSipAccountDataProvider(
             TAG,
             "resolveSipAccount started sourceId=${source.id} title=${source.provider.title} placeId=$placeId",
         )
-        val accessControls = providerService.getPlaceAccessControls(placeId)
-        val accessControl = selectAccessControl(source, accessControls) ?: run {
+        val placeData = placeCatalog.getInitialized(placeId) ?: run {
+            IntercomFileLogger.w(TAG, "resolveSipAccount skipped sourceId=${source.id}: place catalog is not initialized")
+            return null
+        }
+        val accessControl = selectAccessControl(source, placeData.accessControls) ?: run {
             IntercomFileLogger.w(
                 TAG,
-                "resolveSipAccount failed sourceId=${source.id}: access control not found among ${accessControls.size} entries",
+                "resolveSipAccount failed sourceId=${source.id}: access control not found among ${placeData.accessControls.size} entries",
             )
             return null
         }
@@ -48,13 +53,8 @@ class ProptechSipAccountDataProvider(
             TAG,
             "Selected accessControl id=${accessControl.id} name=${accessControl.name} externalCameraId=${accessControl.externalCameraId}",
         )
-        val cameraResources = runCatching {
-            providerService.getPlaceCameras(placeId) + providerService.getPlacePublicCameras(placeId)
-        }.onFailure { error ->
-            IntercomFileLogger.w(TAG, "Failed to load camera resources for placeId=$placeId", error)
-        }.getOrDefault(emptyList())
-        IntercomFileLogger.d(TAG, "Loaded cameraResources count=${cameraResources.size} for placeId=$placeId")
-        val camera = selectCamera(source, cameraResources, accessControl)
+        IntercomFileLogger.d(TAG, "Using initialized cameraResources count=${placeData.cameras.size} for placeId=$placeId")
+        val camera = selectCamera(source, placeData.cameras, accessControl)
         IntercomFileLogger.d(
             TAG,
             "Selected camera id=${camera?.id} title=${camera?.title} matchedByExternalCamera=${camera?.id == accessControl.externalCameraId}",
@@ -103,11 +103,17 @@ class ProptechSipAccountDataProvider(
             TAG,
             "resolveSipIncomingPreview started accountId=${account.id} sourceId=${source.id} placeId=$placeId",
         )
-        val accessControls = providerService.getPlaceAccessControls(placeId)
-        val accessControl = selectAccessControl(source, accessControls) ?: run {
+        val placeData = placeCatalog.getInitialized(placeId) ?: run {
             IntercomFileLogger.w(
                 TAG,
-                "resolveSipIncomingPreview failed accountId=${account.id}: access control not found among ${accessControls.size} entries",
+                "resolveSipIncomingPreview skipped accountId=${account.id}: place catalog is not initialized",
+            )
+            return null
+        }
+        val accessControl = selectAccessControl(source, placeData.accessControls) ?: run {
+            IntercomFileLogger.w(
+                TAG,
+                "resolveSipIncomingPreview failed accountId=${account.id}: access control not found among ${placeData.accessControls.size} entries",
             )
             return null
         }
@@ -115,12 +121,7 @@ class ProptechSipAccountDataProvider(
             TAG,
             "resolveSipIncomingPreview selected accessControl id=${accessControl.id} name=${accessControl.name} externalCameraId=${accessControl.externalCameraId}",
         )
-        val cameraResources = runCatching {
-            providerService.getPlaceCameras(placeId) + providerService.getPlacePublicCameras(placeId)
-        }.onFailure { error ->
-            IntercomFileLogger.w(TAG, "resolveSipIncomingPreview failed to load camera resources for placeId=$placeId", error)
-        }.getOrDefault(emptyList())
-        val camera = selectCamera(source, cameraResources, accessControl)
+        val camera = selectCamera(source, placeData.cameras, accessControl)
         IntercomFileLogger.d(
             TAG,
             "resolveSipIncomingPreview selected camera id=${camera?.id} title=${camera?.title} matchedByExternalCamera=${camera?.id == accessControl.externalCameraId}",

@@ -102,10 +102,23 @@ class AppConfigLoader(
         val provider = List(this?.length() ?: 0) { index -> this?.optJSONObject(index) }
             .firstOrNull { item -> item?.optString("type") == "proptech" }
             ?: return MyHomeProptechConfig()
+        val accountId = provider.opt("accountId")?.toString().orEmpty()
+            .ifBlank { provider.opt("accountNumber")?.toString().orEmpty() }
+            .ifBlank { provider.opt("account")?.toString().orEmpty() }
+        val password = provider.optString("password")
+        val phone = provider.opt("phone")?.toString().orEmpty()
+        require(accountId.isBlank() == password.isBlank()) {
+            "Proptech accountId and password must be specified together"
+        }
+        require(phone.isNotBlank() || (accountId.isNotBlank() && password.isNotBlank())) {
+            "Proptech provider requires phone or accountId with password"
+        }
         return MyHomeProptechConfig(
             enabled = true,
             baseUrl = provider.optString("baseUrl", "https://myhome.proptech.ru"),
-            phone = provider.optString("phone"),
+            phone = phone,
+            accountId = accountId,
+            password = password,
             installationId = provider.optString("installationId", "intercom-android"),
         )
     }

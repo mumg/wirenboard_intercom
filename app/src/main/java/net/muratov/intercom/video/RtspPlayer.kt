@@ -10,6 +10,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -89,7 +90,19 @@ private interface StreamPlaybackView {
 private class ExoPlaybackView(
     context: Context,
 ) : PlayerView(context), StreamPlaybackView {
-    private val exoPlayer = ExoPlayer.Builder(context).build()
+    private val exoPlayer = ExoPlayer.Builder(context)
+        .setLoadControl(
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    /* minBufferMs = */ 0,
+                    /* maxBufferMs = */ 0,
+                    /* bufferForPlaybackMs = */ 0,
+                    /* bufferForPlaybackAfterRebufferMs = */ 0,
+                )
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .build(),
+        )
+        .build()
     private var currentUrl: String? = null
     private var currentHeaders: Map<String, String> = emptyMap()
     private var currentMuted: Boolean? = null
@@ -110,6 +123,19 @@ private class ExoPlaybackView(
             exoPlayer.volume = if (muted) 0f else 1f
         }
         if (currentUrl == url && currentHeaders == headers) return
+
+        // A blank URL is used while a fresh short-lived provider URL is being
+        // requested. Creating the player now lets player initialization run in
+        // parallel with that request without ever playing the previous URL.
+        if (url.isBlank()) {
+            if (currentUrl != null) {
+                currentUrl = null
+                currentHeaders = emptyMap()
+                exoPlayer.stop()
+                exoPlayer.clearMediaItems()
+            }
+            return
+        }
 
         currentUrl = url
         currentHeaders = headers
@@ -223,6 +249,8 @@ private fun createExoMediaSource(
         .setDefaultRequestProperties(headers)
     DefaultMediaSourceFactory(context)
         .setDataSourceFactory(httpDataSourceFactory)
+        .setLiveTargetOffsetMs(0)
+        .setLiveMinOffsetMs(0)
         .createMediaSource(mediaItem)
 }
 

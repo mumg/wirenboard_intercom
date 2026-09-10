@@ -7,6 +7,21 @@ android {
     namespace = "net.muratov.intercom"
     compileSdk = 35
 
+    signingConfigs {
+        create("release") {
+            val configuredKeystorePath = System.getenv("INTERCOM_KEYSTORE_PATH")
+            storeFile = if (configuredKeystorePath.isNullOrBlank()) {
+                file(System.getProperty("user.home")).resolve("android.jks")
+            } else {
+                file(configuredKeystorePath)
+            }
+            storePassword = System.getenv("INTERCOM_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("INTERCOM_KEY_ALIAS")
+            keyPassword = System.getenv("INTERCOM_KEY_PASSWORD")
+                ?: System.getenv("INTERCOM_KEYSTORE_PASSWORD")
+        }
+    }
+
     defaultConfig {
         applicationId = "net.muratov.intercom"
         minSdk = 27
@@ -24,7 +39,7 @@ android {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

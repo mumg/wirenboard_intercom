@@ -4,8 +4,13 @@ data class MyHomeProptechConfig(
     val enabled: Boolean = false,
     val baseUrl: String = "https://myhome.proptech.ru",
     val phone: String = "",
+    val accountId: String = "",
+    val password: String = "",
     val installationId: String = "intercom-android",
-)
+) {
+    val hasPasswordCredentials: Boolean
+        get() = accountId.isNotBlank() && password.isNotBlank()
+}
 
 enum class MyHomeAuthStatus {
     Disabled,

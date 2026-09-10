@@ -12,7 +12,7 @@ interface MyHomeProviderService {
     fun dismissVerificationPrompt()
 
     suspend fun getOperators(): List<MyHomeOperator>
-    suspend fun getLoginContextsByPhone(phone: String = ""): List<MyHomeLoginContext>
+    suspend fun getLoginContexts(login: String = ""): List<MyHomeLoginContext>
     suspend fun registerSubscriberNotifications(pushToken: String): Boolean
     suspend fun getSubscriberPlaces(placeId: Long? = null): List<MyHomeSubscriberPlace>
     suspend fun getSubscriberProfile(): MyHomeSubscriberProfile?

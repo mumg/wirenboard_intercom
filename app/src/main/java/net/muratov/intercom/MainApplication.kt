@@ -8,7 +8,14 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import net.muratov.intercom.logging.IntercomFileLogger
 import net.muratov.intercom.data.provider.ConfigSipAccountDataProvider
@@ -18,6 +25,7 @@ import net.muratov.intercom.data.provider.ProptechSipAccountDataProvider
 import net.muratov.intercom.data.provider.ProptechStreamDataProvider
 import net.muratov.intercom.data.repository.AppConfigLoadResult
 import net.muratov.intercom.data.repository.AppConfigLoader
+import net.muratov.intercom.data.repository.ProptechPlaceCatalog
 import net.muratov.intercom.data.repository.SipAccountRepository
 import net.muratov.intercom.data.repository.StreamRepository
 import net.muratov.intercom.data.model.AppConfig
@@ -76,16 +84,16 @@ class MainApplication : Application() {
             this,
             config.myHomeProptech.copy(enabled = config.myHomeProptech.enabled && hasProptechConsumers),
         )
+        val proptechPlaceCatalog = ProptechPlaceCatalog(myHomeProviderService)
         val providers: List<IntercomProvider> = listOf(
             ConfigStreamDataProvider("config"),
             ConfigSipAccountDataProvider(),
-            ProptechStreamDataProvider(myHomeProviderService),
-            ProptechSipAccountDataProvider(myHomeProviderService),
+            ProptechStreamDataProvider(myHomeProviderService, proptechPlaceCatalog),
+            ProptechSipAccountDataProvider(myHomeProviderService, proptechPlaceCatalog),
         )
         val sipAccountRepository = SipAccountRepository(
             sources = config.sipAccounts,
             providers = providers,
-            myHomeProviderService = myHomeProviderService,
         )
         val mqttCallStateService = config.mqtt
             .takeIf(MqttConfig::isConfigured)
@@ -104,14 +112,15 @@ class MainApplication : Application() {
             streamRepository = StreamRepository(
                 sources = config.streams,
                 providers = providers,
-                myHomeProviderService = myHomeProviderService,
             ),
             sipAccountRepository = sipAccountRepository,
             myHomeProviderService = myHomeProviderService,
+            proptechPlaceCatalog = proptechPlaceCatalog,
             proptechWizardRequired = hasProptechConsumers,
             providers = providers,
             mqttCallStateService = mqttCallStateService,
         )
+        appContainer.initialize()
     }
 
     private fun isMainProcess(processName: String?): Boolean {
@@ -139,25 +148,17 @@ data class AppContainer(
     val streamRepository: StreamRepository,
     val sipAccountRepository: SipAccountRepository,
     val myHomeProviderService: MyHomeProviderService,
+    private val proptechPlaceCatalog: ProptechPlaceCatalog,
     val proptechWizardRequired: Boolean,
     private val providers: List<IntercomProvider>,
     private val mqttCallStateService: MqttCallStateService? = null,
 ) {
-    private val registrationStarted = AtomicBoolean(false)
-    private val mainStarted = AtomicBoolean(false)
+    private val initializationStarted = AtomicBoolean(false)
+    private val runtimeServicesStarted = AtomicBoolean(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _isInitialized = MutableStateFlow(false)
 
-    fun startRegistrationIfNeeded() {
-        if (!isConfigValid) return
-        if (registrationStarted.compareAndSet(false, true)) {
-            runCatching {
-                myHomeProviderService.start()
-            }.onFailure { error ->
-                registrationStarted.set(false)
-                Log.e("AppContainer", "Failed to start proptech registration", error)
-            }
-        }
-    }
+    val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
 
     fun restartRegistration() {
         if (!isConfigValid) return
@@ -170,38 +171,43 @@ data class AppContainer(
         }
     }
 
-    fun startMainIfNeeded() {
+    fun initialize() {
         if (!isConfigValid) return
-        if (mainStarted.compareAndSet(false, true)) {
-            runCatching {
-                mqttCallStateService?.start()
-                scope.launch {
-                    sipAccountRepository.accounts.collectLatest { accounts ->
-                        Log.d("AppContainer", "Starting SIP with ${accounts.size} accounts")
-                        accounts.forEach {
-                            SipCoreManager.register(SipCredentials(
-                                username = it.username,
-                                password = it.password,
-                                domain = it.domain,
-                                server = it.domain,
-                                port = it.port,
-                                transport = it.transport.toLinphoneTransportType(),
-                                stunServer = it.stunServer,
-                                iceEnabled = it.iceEnabled,
-                                id = it.id,
-                            ))
-                        }
+        if (!initializationStarted.compareAndSet(false, true)) return
+
+        scope.launch {
+            myHomeProviderService.state
+                .map { state ->
+                    val tokens = state.tokens
+                    val placeId = state.selectedPlaceId
+                    if (tokens != null && placeId != null) {
+                        ProviderSession(
+                            placeId = placeId,
+                            authorizationHeader = tokens.authorizationHeader,
+                        )
+                    } else {
+                        null
                     }
                 }
+                .distinctUntilChanged()
+                .collect { session ->
+                    if (initializeConfiguration(session)) {
+                        startRuntimeServicesIfNeeded()
+                    }
+                }
+        }
+        if (proptechWizardRequired) {
+            runCatching {
+                myHomeProviderService.start()
             }.onFailure { error ->
-                mainStarted.set(false)
-                Log.e("AppContainer", "Failed to start SIP service", error)
+                Log.e("AppContainer", "Failed to start Proptech registration", error)
             }
         }
     }
 
     fun dispose() {
         mqttCallStateService?.stop()
+        scope.cancel()
     }
 
     suspend fun open(action: ProviderOpenAction): Boolean {
@@ -211,6 +217,61 @@ data class AppContainer(
         }
         return false
     }
+
+    private suspend fun initializeConfiguration(session: ProviderSession?): Boolean {
+        _isInitialized.value = false
+        if (session == null) {
+            proptechPlaceCatalog.clear()
+            if (proptechWizardRequired) {
+                return false
+            }
+        } else {
+            val initialized = runCatching {
+                proptechPlaceCatalog.initialize(session.placeId)
+            }.onFailure { error ->
+                proptechPlaceCatalog.clear()
+                Log.e("AppContainer", "Failed to initialize Proptech place data", error)
+            }.isSuccess
+            if (!initialized) {
+                return false
+            }
+        }
+
+        // Both repositories consume the same completed catalog snapshot. Keeping
+        // this sequence in one coroutine prevents overlapping configuration work.
+        sipAccountRepository.refresh()
+        streamRepository.refresh()
+        _isInitialized.value = true
+        return true
+    }
+
+    private fun startRuntimeServicesIfNeeded() {
+        if (!runtimeServicesStarted.compareAndSet(false, true)) return
+        mqttCallStateService?.start()
+        scope.launch {
+            sipAccountRepository.accounts.collectLatest { accounts ->
+                Log.d("AppContainer", "Starting SIP with ${accounts.size} accounts")
+                accounts.forEach {
+                    SipCoreManager.register(SipCredentials(
+                        username = it.username,
+                        password = it.password,
+                        domain = it.domain,
+                        server = it.domain,
+                        port = it.port,
+                        transport = it.transport.toLinphoneTransportType(),
+                        stunServer = it.stunServer,
+                        iceEnabled = it.iceEnabled,
+                        id = it.id,
+                    ))
+                }
+            }
+        }
+    }
+
+    private data class ProviderSession(
+        val placeId: Long,
+        val authorizationHeader: String,
+    )
 
     private fun SipTransport.toLinphoneTransportType(): TransportType {
         return when (this) {

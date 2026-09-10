@@ -117,23 +117,6 @@ private fun IntercomApp(
         }
     }
 
-    LaunchedEffect(uiState.isConfigValid, uiState.proptechWizardRequired) {
-        if (!uiState.isConfigValid) {
-            return@LaunchedEffect
-        }
-        if (uiState.proptechWizardRequired) {
-            viewModel.startRegistrationIfNeeded()
-        } else {
-            viewModel.startMainIfNeeded()
-        }
-    }
-
-    LaunchedEffect(uiState.isConfigValid, uiState.canEnterMainUi) {
-        if (uiState.isConfigValid && uiState.canEnterMainUi) {
-            viewModel.startMainIfNeeded()
-        }
-    }
-
     LaunchedEffect(uiState.isConfigValid) {
         if (uiState.isConfigValid) {
             return@LaunchedEffect
@@ -176,6 +159,12 @@ private fun IntercomApp(
                 onStart = viewModel::restartRegistration,
                 onRetry = viewModel::restartRegistration,
             )
+        } else if (!uiState.isInitialized) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
         } else {
             IntercomNavGraph(
                 navController = navController,
@@ -183,17 +172,15 @@ private fun IntercomApp(
                 streams = uiState.streams,
                 browserVisible = selectedStreamId == null,
                 stopTileVideoPlayback = uiState.stopTileVideoPlayback,
-                onStreamSelected = { stream -> selectedStreamId = stream.id },
+                onStreamSelected = { stream ->
+                    // Show the fullscreen surface immediately so ExoPlayer can be
+                    // created while the provider issues a fresh playback URL.
+                    // The old URL is deliberately cleared and is never replayed.
+                    fullscreenStream = stream.copy(rtspUrl = "")
+                    selectedStreamId = stream.id
+                },
                 modifier = Modifier.fillMaxSize(),
             )
-
-            if (selectedStreamId != null && isFullscreenStreamLoading) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center),
-                    )
-                }
-            }
 
             if (fullscreenStream != null) {
                 val openAction = fullscreenStream?.openAction?.takeIf(viewModel::canOpen)
@@ -207,6 +194,14 @@ private fun IntercomApp(
                         { viewModel.open(action) }
                     },
                 )
+            }
+
+            if (selectedStreamId != null && isFullscreenStreamLoading) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
             }
         }
 

@@ -4,6 +4,7 @@ import net.muratov.intercom.data.model.ProviderOpenAction
 import net.muratov.intercom.data.model.RtspStream
 import net.muratov.intercom.data.model.StreamSourceConfig
 import net.muratov.intercom.data.model.StreamPlaybackEngine
+import net.muratov.intercom.data.repository.ProptechPlaceCatalog
 import net.muratov.intercom.provider.myhome.MyHomeAccessControl
 import net.muratov.intercom.provider.myhome.MyHomeCameraResource
 import net.muratov.intercom.provider.myhome.MyHomeProviderService
@@ -11,6 +12,7 @@ import org.json.JSONObject
 
 class ProptechStreamDataProvider(
     private val providerService: MyHomeProviderService,
+    private val placeCatalog: ProptechPlaceCatalog,
 ) : IntercomProvider {
     override val type: String = "proptech"
 
@@ -20,38 +22,57 @@ class ProptechStreamDataProvider(
             action.extras["placeId"]?.toLongOrNull() != null
     }
 
+    override suspend fun resolveStreamConfiguration(source: StreamSourceConfig): RtspStream? {
+        return resolveStream(source, requestFreshPlaybackUrl = false)
+    }
+
     override suspend fun resolveStream(source: StreamSourceConfig): RtspStream? {
+        return resolveStream(source, requestFreshPlaybackUrl = true)
+    }
+
+    private suspend fun resolveStream(
+        source: StreamSourceConfig,
+        requestFreshPlaybackUrl: Boolean,
+    ): RtspStream? {
         val state = providerService.state.value
         val tokens = state.tokens ?: return null
         val placeId = state.selectedPlaceId ?: return null
+        val placeData = placeCatalog.getInitialized(placeId) ?: return null
+        val accessControl = selectAccessControl(source, placeData.accessControls)
+        val target = ResolvedTarget(
+            accessControl = accessControl,
+            camera = selectCamera(source, placeData.cameras, accessControl),
+        )
 
-        val accessControls = providerService.getPlaceAccessControls(placeId)
-        val accessControl = selectAccessControl(source, accessControls)
-        val cameraResources = runCatching {
-            providerService.getPlaceCameras(placeId) + providerService.getPlacePublicCameras(placeId)
-        }.getOrDefault(emptyList())
-        val camera = selectCamera(source, cameraResources, accessControl)
-
-        val previewUrl = accessControl?.let {
+        val previewUrl = target.accessControl?.let {
             "${providerService.baseUrl}/rest/v1/places/$placeId/accesscontrols/${it.id}/videosnapshots"
         }
-        val rtspUrl = accessControl?.externalCameraId
-            ?.let { externalCameraId ->
-                runCatching { providerService.getForpostCameraVideoUrl(externalCameraId) }.getOrNull()
-            }
-            ?: camera?.extractRtspUrl()
-        if (rtspUrl.isNullOrBlank()) return null
+        val externalCameraId = target.accessControl?.externalCameraId
+        val rtspUrl = if (externalCameraId != null && requestFreshPlaybackUrl) {
+            runCatching {
+                providerService.getForpostCameraVideoUrl(externalCameraId)
+            }.getOrNull()
+        } else if (externalCameraId != null) {
+            // A short-lived URL is intentionally not requested during startup.
+            // The stable externalCameraId above is sufficient to resolve a new
+            // URL when playback is explicitly opened.
+            ""
+        } else {
+            target.camera?.extractRtspUrl()
+        }
+        if (requestFreshPlaybackUrl && rtspUrl.isNullOrBlank()) return null
+        if (externalCameraId == null && rtspUrl.isNullOrBlank()) return null
 
         return RtspStream(
             id = source.id,
             title = source.title,
-            rtspUrl = rtspUrl,
+            rtspUrl = rtspUrl.orEmpty(),
             playbackEngine = StreamPlaybackEngine.EXO_PLAYER,
             rtspExtras = mapOf("Authorization" to tokens.authorizationHeader),
             previewUrl = previewUrl,
             previewReloadPeriodMs = source.provider.previewReloadPeriodMs ?: 15_000L,
             previewExtras = mapOf("Authorization" to tokens.authorizationHeader),
-            openAction = accessControl?.let {
+            openAction = target.accessControl?.let {
                 ProviderOpenAction(
                     providerType = type,
                     targetId = it.id.toString(),
@@ -60,6 +81,11 @@ class ProptechStreamDataProvider(
             },
         )
     }
+
+    /*
+     * Keep all selection logic below purely in-memory. Network access belongs
+     * either to startup catalog initialization or to the fresh URL request.
+     */
 
     override suspend fun open(action: ProviderOpenAction): Boolean {
         if (!canOpen(action)) return false
@@ -96,6 +122,11 @@ class ProptechStreamDataProvider(
             camera.id == source.id
         } ?: cameras.singleOrNull()
     }
+
+    private data class ResolvedTarget(
+        val accessControl: MyHomeAccessControl?,
+        val camera: MyHomeCameraResource?,
+    )
 }
 
 private fun MyHomeCameraResource.extractRtspUrl(): String? {

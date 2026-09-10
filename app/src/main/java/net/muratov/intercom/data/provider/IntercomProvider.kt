@@ -10,6 +10,10 @@ import net.muratov.intercom.data.model.StreamSourceConfig
 interface IntercomProvider {
     val type: String
 
+    suspend fun resolveStreamConfiguration(source: StreamSourceConfig): RtspStream? {
+        return resolveStream(source)
+    }
+
     suspend fun resolveStream(source: StreamSourceConfig): RtspStream? = null
 
     suspend fun resolveSipAccount(source: SipAccountSourceConfig): SipAccountConfig? = null

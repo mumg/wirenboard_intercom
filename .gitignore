@@ -8,8 +8,10 @@
 app/build/
 app/release
 app_config_entrance.json
+/app_config.json
 /tools/
 /sipserver/config.json
 /sipserver/.idea/
 /sipserver/bin/sipserver
 /app_config_bedroom.json
+/app/src/main/assets/app_config.json

@@ -24,6 +24,7 @@ import net.muratov.intercom.voip.SipCoreManager
 
 data class MainUiState(
     val isConfigValid: Boolean = true,
+    val isInitialized: Boolean = false,
     val configFilePath: String = "",
     val configErrorMessage: String? = null,
     val streams: List<RtspStream> = emptyList(),
@@ -57,9 +58,11 @@ class MainViewModel(
         container.streamRepository.streams,
         container.myHomeProviderService.state,
         stopTileVideoPlayback,
-    ) { streams, providerState, shouldStopTileVideoPlayback ->
+        container.isInitialized,
+    ) { streams, providerState, shouldStopTileVideoPlayback, isInitialized ->
         MainUiState(
             isConfigValid = container.isConfigValid,
+            isInitialized = isInitialized,
             configFilePath = container.configFilePath,
             configErrorMessage = container.configErrorMessage,
             streams = streams,
@@ -89,16 +92,8 @@ class MainViewModel(
         container.myHomeProviderService.dismissVerificationPrompt()
     }
 
-    fun startRegistrationIfNeeded() {
-        container.startRegistrationIfNeeded()
-    }
-
     fun restartRegistration() {
         container.restartRegistration()
-    }
-
-    fun startMainIfNeeded() {
-        container.startMainIfNeeded()
     }
 
     fun canOpen(action: ProviderOpenAction): Boolean {

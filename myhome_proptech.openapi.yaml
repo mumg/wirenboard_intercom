@@ -1,9 +1,10 @@
 openapi: 3.0.3
 info:
   title: MyHome Proptech API
-  version: "0.1.0"
+  version: "0.2.0"
   description: >
-    Черновая OpenAPI-спецификация, восстановленная по HAR-файлу
+    Черновая OpenAPI-спецификация, восстановленная по HAR-файлам от
+    2026-03-25 и 2026-09-09.
   contact:
     name: Reverse engineered from HAR
 servers:
@@ -14,9 +15,11 @@ servers:
 tags:
   - name: Public
   - name: Auth
+  - name: Device
   - name: Subscriber
   - name: Access Control
   - name: Camera
+  - name: Communication
   - name: Payment
   - name: Realtime
 paths:
@@ -44,19 +47,22 @@ paths:
                         mobileFeatures:
                           - ALLOW_NEW_ADDRESS
 
-  /auth/v2/login/{phone}:
+  /auth/v2/login/{login}:
     get:
       tags: [Auth]
-      summary: Find login contexts by phone
+      summary: Find login contexts
       description: >
-        По номеру телефона возвращает возможные контексты авторизации
-        (`operatorId`, `accountId`, `placeId`, `profileId`).
-      operationId: getLoginContextsByPhone
+        По номеру телефона или аккаунта ищет возможные контексты авторизации
+        (`operatorId`, `accountId`, `placeId`, `profileId`). Для номера аккаунта
+        сервер также может вернуть `200` с пустым телом; после этого официальный
+        клиент продолжает парольную авторизацию.
+      operationId: getLoginContexts
       parameters:
-        - $ref: "#/components/parameters/PhonePath"
+        - $ref: "#/components/parameters/LoginPath"
       responses:
         "200":
-          description: Login contexts found
+          description: Login contexts found, or an empty response for an account login
+          x-empty-body-allowed: true
           content:
             application/json:
               schema:
@@ -67,6 +73,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LoginContextList"
+
+  /auth/v2/auth/{login}/password:
+    post:
+      tags: [Auth]
+      summary: Authenticate with account password
+      description: >
+        Выполняет прямую парольную авторизацию по номеру аккаунта и возвращает
+        bearer-токены. Поля `hash1` и `hash2` являются вычисляемыми подписями;
+        открытый пароль в запрос не передается.
+      operationId: authenticateByPassword
+      parameters:
+        - $ref: "#/components/parameters/LoginPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordAuthRequest"
+      responses:
+        "200":
+          description: Authentication succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokensResponse"
+        "400":
+          description: Invalid credentials or request signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /auth/v2/confirmation/{phone}:
     post:
@@ -120,6 +157,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/mh-customer-device/mobile/public/v1/customers/device-installations:
+    post:
+      tags: [Device]
+      summary: Register a mobile application installation
+      description: >
+        Регистрирует установку до авторизации и возвращает динамическую
+        конфигурацию backend/auth providers.
+      operationId: registerDeviceInstallation
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceInstallationRequest"
+      responses:
+        "200":
+          description: Installation registered and runtime configuration returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceInstallationResponse"
+
   /rest/v1/subscriberNotifications:
     post:
       tags: [Subscriber]
@@ -128,6 +188,8 @@ paths:
       operationId: registerSubscriberNotifications
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OperatorHeader"
       requestBody:
         required: true
         content:
@@ -159,6 +221,7 @@ paths:
           schema:
             type: integer
             format: int64
+        - $ref: "#/components/parameters/OperatorHeader"
       responses:
         "200":
           description: Places list
@@ -167,6 +230,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/SubscriberPlacesResponse"
 
+  /api/mh-customer/mobile/v1/customers/places/{placeId}/settings/screens:
+    get:
+      tags: [Subscriber]
+      summary: Get enabled application screens for a place
+      description: Возвращает конфигурацию доступных экранов и их сущностей.
+      operationId: getPlaceScreenSettings
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PlaceIdPath"
+        - $ref: "#/components/parameters/OperatorHeader"
+      responses:
+        "200":
+          description: Screen settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenSettingsResponse"
+
+  /api/mh-customer-communication/mobile/v1/communications:
+    post:
+      tags: [Communication]
+      summary: Get customer communications
+      description: Возвращает сторис и баннеры, доступные текущему пользователю.
+      operationId: getCustomerCommunications
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OperatorHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MobileClientRequest"
+      responses:
+        "200":
+          description: Communications loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommunicationsResponse"
+
   /rest/v1/subscribers/profiles:
     get:
       tags: [Subscriber]
@@ -174,6 +280,8 @@ paths:
       operationId: getSubscriberProfile
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OperatorHeader"
       responses:
         "200":
           description: Profile loaded
@@ -192,6 +300,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/PlaceIdPath"
+        - $ref: "#/components/parameters/OperatorHeader"
       responses:
         "200":
           description: Access controls
@@ -199,6 +308,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AccessControlsResponse"
+
+  /rest/v1/places/{placeId}/screen-sections:
+    get:
+      tags: [Subscriber]
+      summary: Get home screen sections for a place
+      description: >
+        Возвращает упорядоченные секции главного экрана и связанные с ними
+        сущности, например камеры точек доступа.
+      operationId: getPlaceScreenSections
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PlaceIdPath"
+        - $ref: "#/components/parameters/OperatorHeader"
+      responses:
+        "200":
+          description: Screen sections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenSectionsResponse"
 
   /rest/v1/places/{placeId}/accesscontrols/{accessControlId}/videosnapshots:
     get:
@@ -211,6 +341,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PlaceIdPath"
         - $ref: "#/components/parameters/AccessControlIdPath"
+        - $ref: "#/components/parameters/OperatorHeader"
       responses:
         "200":
           description: Snapshot image
@@ -233,6 +364,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PlaceIdPath"
         - $ref: "#/components/parameters/AccessControlIdPath"
+        - $ref: "#/components/parameters/OperatorHeader"
       requestBody:
         required: true
         content:
@@ -263,6 +395,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PlaceIdPath"
         - $ref: "#/components/parameters/AccessControlIdPath"
+        - $ref: "#/components/parameters/OperatorHeader"
       requestBody:
         required: true
         content:
@@ -286,6 +419,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/PlaceIdPath"
+        - $ref: "#/components/parameters/OperatorHeader"
       responses:
         "200":
           description: Cameras list
@@ -303,6 +437,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/PlaceIdPath"
+        - $ref: "#/components/parameters/OperatorHeader"
       responses:
         "200":
           description: Public cameras list
@@ -318,6 +453,8 @@ paths:
       operationId: getAvailableStompFeatures
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OperatorHeader"
       responses:
         "200":
           description: Realtime features
@@ -325,6 +462,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NullableDataResponse"
+
+  /events:
+    get:
+      tags: [Realtime]
+      summary: Open realtime events WebSocket
+      description: >
+        WebSocket upgrade endpoint. Клиент предлагает STOMP 1.0-1.2 через
+        `Sec-WebSocket-Protocol`; успешный handshake отвечает кодом `101`.
+      operationId: connectEventsWebSocket
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OperatorHeader"
+        - name: Sec-WebSocket-Protocol
+          in: header
+          required: true
+          description: Предлагаемые версии STOMP, разделенные запятыми.
+          schema:
+            type: string
+            example: v12.stomp, v11.stomp, v10.stomp
+      responses:
+        "101":
+          description: Switching Protocols
+          headers:
+            Sec-WebSocket-Protocol:
+              description: Выбранная сервером версия STOMP.
+              schema:
+                type: string
 
   /api/mh-payment/mobile/v1/finance:
     get:
@@ -340,6 +505,7 @@ paths:
           schema:
             type: integer
             format: int64
+        - $ref: "#/components/parameters/OperatorHeader"
       responses:
         "200":
           description: Finance info
@@ -356,6 +522,13 @@ components:
       bearerFormat: JWT
 
   parameters:
+    LoginPath:
+      name: login
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Номер телефона или аккаунта в формате, ожидаемом API.
     PhonePath:
       name: phone
       in: path
@@ -377,6 +550,16 @@ components:
       schema:
         type: integer
         format: int64
+    OperatorHeader:
+      name: Operator
+      in: header
+      required: false
+      description: >
+        Идентификатор оператора выбранного места. Официальный клиент добавляет
+        заголовок после получения subscriber place; при первичной загрузке
+        контекста он может отсутствовать.
+      schema:
+        type: integer
 
   schemas:
     EmptyObject:
@@ -547,6 +730,31 @@ components:
         - subscriberId
       additionalProperties: false
 
+    PasswordAuthRequest:
+      type: object
+      properties:
+        login:
+          type: string
+          description: Номер аккаунта; совпадает с path-параметром `login`.
+        timestamp:
+          type: string
+          format: date-time
+          description: UTC timestamp формирования подписи.
+        hash1:
+          type: string
+          format: byte
+          description: Base64-представление SHA-1 хэша пароля.
+        hash2:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+          description: MD5-подпись запроса в нижнем регистре.
+      required:
+        - login
+        - timestamp
+        - hash1
+        - hash2
+      additionalProperties: false
+
     AuthTokensResponse:
       type: object
       properties:
@@ -577,7 +785,25 @@ components:
         - refreshToken
       additionalProperties: true
 
-    SubscriberNotificationRegistrationRequest:
+    MobileClientRequest:
+      type: object
+      properties:
+        appVersionCode:
+          type: integer
+        appId:
+          type: integer
+        appVersion:
+          type: string
+        platform:
+          type: string
+      required:
+        - appVersionCode
+        - appId
+        - appVersion
+        - platform
+      additionalProperties: false
+
+    DeviceInstallationRequest:
       type: object
       properties:
         appVersionCode:
@@ -608,6 +834,93 @@ components:
         - appId
         - appVersion
         - platform
+        - pushToken
+        - isDevelop
+        - deviceManufacturer
+        - deviceModelName
+        - osVersion
+        - deviceId
+      additionalProperties: false
+
+    DeviceInstallationResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/DeviceInstallationConfig"
+      required:
+        - data
+      additionalProperties: true
+
+    DeviceInstallationConfig:
+      type: object
+      properties:
+        AUTH_PROVIDER:
+          type: object
+          properties:
+            myhome:
+              type: object
+              additionalProperties: true
+          additionalProperties: true
+        MOBILE_URL:
+          $ref: "#/components/schemas/MobileUrlConfig"
+      additionalProperties: true
+
+    MobileUrlConfig:
+      type: object
+      properties:
+        domain:
+          type: object
+          properties:
+            backend:
+              type: string
+              format: uri
+            genesys:
+              type: string
+              format: uri
+            stomp:
+              type: string
+            expiredAt:
+              type: integer
+              format: int64
+          additionalProperties: true
+        policy:
+          type: string
+      additionalProperties: true
+
+    SubscriberNotificationRegistrationRequest:
+      type: object
+      properties:
+        appVersionCode:
+          type: integer
+        installationId:
+          type: string
+        appId:
+          type: integer
+        appVersion:
+          type: string
+        platform:
+          type: string
+        deviceType:
+          type: string
+        pushToken:
+          type: string
+        isDevelop:
+          type: boolean
+        deviceManufacturer:
+          type: string
+        deviceModelName:
+          type: string
+        osVersion:
+          type: string
+        deviceId:
+          type: string
+      required:
+        - appVersionCode
+        - installationId
+        - appId
+        - appVersion
+        - platform
+        - deviceType
         - pushToken
         - isDevelop
         - deviceManufacturer
@@ -783,6 +1096,191 @@ components:
           type: string
         numberValid:
           type: boolean
+      additionalProperties: true
+
+    ScreenSettingsResponse:
+      type: object
+      properties:
+        screens:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScreenSetting"
+      required:
+        - screens
+      additionalProperties: true
+
+    ScreenSetting:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Тип экрана; в HAR встречаются `ACCESS_CONTROLS` и `FAVORITES`.
+        entities:
+          type: array
+          items: {}
+      required:
+        - type
+        - entities
+      additionalProperties: true
+
+    CommunicationsResponse:
+      type: object
+      properties:
+        stories:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommunicationStory"
+        banners:
+          type: array
+          items: {}
+      required:
+        - stories
+        - banners
+      additionalProperties: true
+
+    CommunicationStory:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        type:
+          type: string
+        theme:
+          type: string
+        banner:
+          $ref: "#/components/schemas/CommunicationMedia"
+        externalId:
+          type: string
+          nullable: true
+        screens:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommunicationScreen"
+      required:
+        - id
+        - title
+        - type
+        - theme
+        - banner
+        - screens
+      additionalProperties: true
+
+    CommunicationScreen:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        text:
+          type: string
+        displayTimeSeconds:
+          type: integer
+        theme:
+          type: string
+        banner:
+          $ref: "#/components/schemas/CommunicationMedia"
+        video:
+          nullable: true
+        advertiser:
+          nullable: true
+        buttons:
+          type: array
+          items: {}
+      required:
+        - id
+        - title
+        - text
+        - displayTimeSeconds
+        - theme
+        - banner
+        - buttons
+      additionalProperties: true
+
+    CommunicationMedia:
+      type: object
+      properties:
+        fullUrl:
+          type: string
+          format: uri
+      required:
+        - fullUrl
+      additionalProperties: true
+
+    ScreenSectionsResponse:
+      type: object
+      properties:
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScreenSection"
+      required:
+        - sections
+      additionalProperties: true
+
+    ScreenSection:
+      type: object
+      properties:
+        order:
+          type: integer
+        title:
+          type: string
+        type:
+          type: string
+          description: В HAR подтвержден тип `ACCESS_CONTROL_CAMERA`.
+        entities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScreenSectionEntity"
+      required:
+        - order
+        - title
+        - type
+        - entities
+      additionalProperties: true
+
+    ScreenSectionEntity:
+      type: object
+      properties:
+        accessControlId:
+          type: integer
+          format: int64
+        name:
+          type: string
+        allowVideo:
+          type: boolean
+        allowSlideshow:
+          type: boolean
+        previewAvailable:
+          type: boolean
+        videoDownloadAvailable:
+          type: boolean
+        timeZone:
+          type: integer
+        quota:
+          type: integer
+        externalCameraId:
+          type: string
+        serviceActivated:
+          type: boolean
+        recordType:
+          type: string
+      required:
+        - accessControlId
+        - name
+        - allowVideo
+        - allowSlideshow
+        - previewAvailable
+        - videoDownloadAvailable
+        - timeZone
+        - quota
+        - externalCameraId
+        - serviceActivated
+        - recordType
       additionalProperties: true
 
     AccessControlsResponse:

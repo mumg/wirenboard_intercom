@@ -384,7 +384,11 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
 
 - `type`: `"proptech"`
 - `baseUrl`
-- `phone`
+- `phone`: телефон для авторизации с подтверждением по SMS
+- `accountId`: номер аккаунта для авторизации без SMS
+- `password`: пароль аккаунта для авторизации без SMS
+
+Если одновременно заданы `accountId` и `password`, используется авторизация по аккаунту и SMS не запрашивается. Поле `phone` в этом режиме можно не указывать. `accountId` и `password` должны быть заданы вместе.
 
 Пример:
 
@@ -395,6 +399,21 @@ adb push app_config.json /sdcard/Android/data/net.muratov.intercom/files/app_con
       "type": "proptech",
       "baseUrl": "https://myhome.proptech.ru",
       "phone": "79990000000"
+    }
+  ]
+}
+```
+
+Пример авторизации по номеру аккаунта без SMS:
+
+```json
+{
+  "providers": [
+    {
+      "type": "proptech",
+      "baseUrl": "https://myhome.proptech.ru",
+      "accountId": "YOUR_ACCOUNT_NUMBER",
+      "password": "YOUR_ACCOUNT_PASSWORD"
     }
   ]
 }

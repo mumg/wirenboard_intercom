@@ -31,12 +31,13 @@ fun ProptechRegistrationWizardScreen(
     onRetry: () -> Unit,
 ) {
     val statusText = when (providerState.status) {
-        MyHomeAuthStatus.Disabled -> "Proptech не настроен. Проверьте секцию providers и phone в конфиге."
+        MyHomeAuthStatus.Disabled ->
+            "Proptech не настроен. Укажите phone либо accountId и password в секции providers."
         MyHomeAuthStatus.Idle -> "Для продолжения нужно пройти регистрацию у провайдера Proptech."
         MyHomeAuthStatus.SelectingContext -> "Выберите адрес в открывшемся окне."
         MyHomeAuthStatus.RequestingCode -> "Отправляем код подтверждения."
         MyHomeAuthStatus.WaitingForCode -> "Введите код подтверждения в открывшемся окне."
-        MyHomeAuthStatus.Authorizing -> "Проверяем код и получаем токен."
+        MyHomeAuthStatus.Authorizing -> "Проверяем данные и получаем токен."
         MyHomeAuthStatus.Error -> providerState.message.ifBlank { "Не удалось пройти регистрацию Proptech." }
         MyHomeAuthStatus.Authorized -> "Авторизация завершена."
     }

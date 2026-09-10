@@ -39,6 +39,22 @@
       "distributed": true
     }
   ],
+  "external_accounts": [
+    {
+      "name": "remote-doorphone",
+      "interface": "lan-a",
+      "server": "sip.remote.example:5060",
+      "domain": "sip.remote.example",
+      "transport": "UDP",
+      "username": "remote1000",
+      "auth_username": "remote1000",
+      "password": "secret",
+      "contact_user": "remote1000",
+      "expires": 300,
+      "caller": "1000",
+      "callee": "hunt"
+    }
+  ],
   "media": {
     "rtp_port_start": 20000,
     "rtp_port_end": 20100,
