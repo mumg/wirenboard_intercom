@@ -96,14 +96,6 @@ private fun IntercomApp(
     var isFullscreenStreamLoading by remember { mutableStateOf(false) }
     val showConfigRequired = !uiState.isConfigValid
     val showWizard = uiState.proptechWizardRequired && !uiState.canEnterMainUi
-    val shouldConsumeBack =
-        selectedStreamId == null &&
-            uiState.contextSelectionPrompt == null &&
-            uiState.verificationPrompt == null
-
-    BackHandler(enabled = shouldConsumeBack) {
-        // Keep the launcher on screen when the app is used as HOME.
-    }
 
     DisposableEffect(activity, view) {
         val window = activity?.window
@@ -140,10 +132,14 @@ private fun IntercomApp(
             return@LaunchedEffect
         }
         isFullscreenStreamLoading = true
-        fullscreenStream = viewModel.resolveFullscreenStream(streamId)
-        isFullscreenStreamLoading = false
-        if (fullscreenStream == null) {
-            selectedStreamId = null
+        while (isActive && selectedStreamId == streamId) {
+            val resolvedStream = viewModel.resolveFullscreenStream(streamId)
+            if (resolvedStream != null) {
+                fullscreenStream = resolvedStream
+                isFullscreenStreamLoading = false
+                break
+            }
+            delay(FULLSCREEN_STREAM_RETRY_DELAY_MS)
         }
     }
 
@@ -242,3 +238,5 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+private const val FULLSCREEN_STREAM_RETRY_DELAY_MS = 5_000L

@@ -31,12 +31,8 @@ class ProptechPlaceCatalog(
             if (currentData?.placeId == placeId) return
 
             val accessControls = providerService.getPlaceAccessControls(placeId)
-            val privateCameras = runCatching {
-                providerService.getPlaceCameras(placeId)
-            }.getOrDefault(emptyList())
-            val publicCameras = runCatching {
-                providerService.getPlacePublicCameras(placeId)
-            }.getOrDefault(emptyList())
+            val privateCameras = providerService.getPlaceCameras(placeId)
+            val publicCameras = providerService.getPlacePublicCameras(placeId)
 
             currentData = ProptechPlaceData(
                 placeId = placeId,

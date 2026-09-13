@@ -6,13 +6,14 @@ import android.os.Build
 import android.os.Process
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -153,6 +154,10 @@ data class AppContainer(
     private val providers: List<IntercomProvider>,
     private val mqttCallStateService: MqttCallStateService? = null,
 ) {
+    private companion object {
+        const val INITIALIZATION_RETRY_DELAY_MS = 5_000L
+    }
+
     private val initializationStarted = AtomicBoolean(false)
     private val runtimeServicesStarted = AtomicBoolean(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -190,10 +195,12 @@ data class AppContainer(
                     }
                 }
                 .distinctUntilChanged()
-                .collect { session ->
-                    if (initializeConfiguration(session)) {
-                        startRuntimeServicesIfNeeded()
+                .collectLatest { session ->
+                    if (session == null && proptechWizardRequired) {
+                        _isInitialized.value = false
+                        return@collectLatest
                     }
+                    initializeUntilSuccessful(session)
                 }
         }
         if (proptechWizardRequired) {
@@ -216,6 +223,30 @@ data class AppContainer(
             if (provider.open(action)) return true
         }
         return false
+    }
+
+    private suspend fun initializeUntilSuccessful(session: ProviderSession?) {
+        while (true) {
+            val initialized = try {
+                initializeConfiguration(session)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Log.e("AppContainer", "Unexpected initialization failure", error)
+                false
+            }
+
+            if (initialized) {
+                startRuntimeServicesIfNeeded()
+                return
+            }
+
+            Log.w(
+                "AppContainer",
+                "Initialization incomplete; retrying in ${INITIALIZATION_RETRY_DELAY_MS}ms",
+            )
+            delay(INITIALIZATION_RETRY_DELAY_MS)
+        }
     }
 
     private suspend fun initializeConfiguration(session: ProviderSession?): Boolean {

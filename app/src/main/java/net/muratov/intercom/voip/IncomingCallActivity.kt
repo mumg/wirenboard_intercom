@@ -15,18 +15,24 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import net.muratov.intercom.databinding.ActivityIncomingCallBinding
 import net.muratov.intercom.logging.IntercomFileLogger
 import net.muratov.intercom.video.createRtspPlaybackView
 import net.muratov.intercom.video.playRtspOnView
 import net.muratov.intercom.video.releaseRtspPlaybackView
+import net.muratov.intercom.video.setRtspPlaybackCallbacks
 import org.linphone.core.Call
 import java.io.File
 
 class IncomingCallActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "IncomingCallActivity"
+        private const val PROPTECH_PROVIDER_TYPE = "proptech"
+        private const val PROPTECH_PREVIEW_RETRY_DELAY_MS = 5_000L
     }
 
     private lateinit var binding: ActivityIncomingCallBinding
@@ -37,6 +43,8 @@ class IncomingCallActivity : AppCompatActivity() {
     private var incomingCallSoundAccountId: String? = null
     private var previewPlaybackView: View? = null
     private var previewRefreshRequestId: Long = 0L
+    private var previewRefreshJob: Job? = null
+    private var previewRefreshAccountId: String? = null
 
     private val appContainer: net.muratov.intercom.AppContainer
         get() = (application as net.muratov.intercom.MainApplication).appContainer
@@ -85,6 +93,7 @@ class IncomingCallActivity : AppCompatActivity() {
     override fun onPause() {
         IntercomFileLogger.i(TAG, "onPause")
         incomingCallSound?.stop()
+        stopPreviewRefresh()
         clearRemotePreviewPlayback()
         SipCoreManager.attachVideoWindows(null, null)
         super.onPause()
@@ -101,6 +110,7 @@ class IncomingCallActivity : AppCompatActivity() {
         IntercomFileLogger.i(TAG, "onDestroy")
         incomingCallSound?.release()
         incomingCallSound = null
+        stopPreviewRefresh()
         clearRemotePreviewPlayback()
         super.onDestroy()
     }
@@ -207,63 +217,111 @@ class IncomingCallActivity : AppCompatActivity() {
         )
     }
 
-    private fun refreshVideoWindows() {
-        val currentAccount = getCurrentAccount()
-        val requestId = ++previewRefreshRequestId
-        IntercomFileLogger.d(
-            TAG,
-            "refreshVideoWindows accountId=${currentAccount?.id ?: "<none>"} requestId=$requestId",
-        )
-        if (currentAccount == null) {
-            clearRemotePreviewPlayback()
-            binding.remotePreviewContainer.visibility = View.GONE
-            binding.remoteVideoSurface.visibility = View.VISIBLE
-            IntercomFileLogger.i(TAG, "No current account, binding SIP video surface instead")
-            SipCoreManager.attachVideoWindows(binding.remoteVideoSurface, null)
+    private fun refreshVideoWindows(forceProptechRefresh: Boolean = false) {
+        val accountId = SipCoreManager.getCurrentCallAccountId()
+        val providerType = accountId?.let(appContainer.sipAccountRepository::getProviderType)
+        if (providerType != PROPTECH_PROVIDER_TYPE) {
+            showSipVideo(accountId)
             return
         }
-        lifecycleScope.launch {
-            val preview = appContainer.sipAccountRepository.resolveIncomingPreview(currentAccount.id)
-            if (requestId != previewRefreshRequestId) {
+
+        if (previewRefreshAccountId == accountId && previewRefreshJob?.isActive == true) {
+            return
+        }
+        if (!forceProptechRefresh && previewRefreshAccountId == accountId && previewPlaybackView != null) {
+            return
+        }
+
+        stopPreviewRefresh()
+        val requestId = ++previewRefreshRequestId
+        previewRefreshAccountId = accountId
+        IntercomFileLogger.d(
+            TAG,
+            "refreshVideoWindows Proptech accountId=$accountId requestId=$requestId",
+        )
+        binding.remoteVideoSurface.visibility = View.GONE
+        binding.remotePreviewContainer.visibility = View.VISIBLE
+        binding.previewLoadingIndicator.visibility = View.VISIBLE
+        SipCoreManager.attachVideoWindows(null, null)
+
+        previewRefreshJob = lifecycleScope.launch {
+            while (isActive && requestId == previewRefreshRequestId) {
+                val preview = appContainer.sipAccountRepository.resolveIncomingPreview(accountId)
+                if (requestId != previewRefreshRequestId) return@launch
+
                 IntercomFileLogger.d(
                     TAG,
-                    "Ignoring stale preview resolution accountId=${currentAccount.id} requestId=$requestId latestRequestId=$previewRefreshRequestId",
+                    "Proptech RTSP preview resolution accountId=$accountId available=${preview != null} " +
+                        "headers=${preview?.headers?.keys ?: emptySet<String>()}",
                 )
-                return@launch
-            }
-            IntercomFileLogger.d(
-                TAG,
-                "refreshVideoWindows resolved accountId=${currentAccount.id} previewRtspUrl=${preview?.rtspUrl ?: "<none>"} headers=${preview?.headers?.keys ?: emptySet<String>()}",
-            )
-            if (preview != null) {
-                binding.remoteVideoSurface.visibility = View.GONE
-                binding.remotePreviewContainer.visibility = View.VISIBLE
-                SipCoreManager.attachVideoWindows(null, null)
-                val playbackView = previewPlaybackView ?: createRtspPlaybackView(
-                    context = this@IncomingCallActivity,
-                    playbackEngine = preview.playbackEngine,
-                ).also { view ->
-                    previewPlaybackView = view
-                    binding.remotePreviewContainer.removeAllViews()
-                    binding.remotePreviewContainer.addView(view)
-                    IntercomFileLogger.i(TAG, "Created RTSP preview playback view engine=${preview.playbackEngine}")
+                if (preview != null) {
+                    val playbackView = previewPlaybackView ?: createRtspPlaybackView(
+                        context = this@IncomingCallActivity,
+                        playbackEngine = preview.playbackEngine,
+                    ).also { view ->
+                        previewPlaybackView = view
+                        binding.remotePreviewContainer.removeAllViews()
+                        binding.remotePreviewContainer.addView(view)
+                        IntercomFileLogger.i(TAG, "Created RTSP preview playback view engine=${preview.playbackEngine}")
+                    }
+                    setRtspPlaybackCallbacks(
+                        view = playbackView,
+                        onPlaybackStarted = {
+                            runOnUiThread {
+                                if (previewPlaybackView === playbackView &&
+                                    SipCoreManager.getCurrentCallAccountId() == accountId
+                                ) {
+                                    binding.previewLoadingIndicator.visibility = View.GONE
+                                    IntercomFileLogger.i(TAG, "Proptech RTSP preview is playing")
+                                }
+                            }
+                        },
+                        onNewUrlRequired = {
+                            runOnUiThread {
+                                if (previewPlaybackView === playbackView &&
+                                    SipCoreManager.getCurrentCallAccountId() == accountId
+                                ) {
+                                    binding.previewLoadingIndicator.visibility = View.VISIBLE
+                                    IntercomFileLogger.w(TAG, "Proptech RTSP URL failed; requesting a fresh URL")
+                                    refreshVideoWindows(forceProptechRefresh = true)
+                                }
+                            }
+                        },
+                    )
+                    playRtspOnView(
+                        view = playbackView,
+                        url = preview.rtspUrl,
+                        headers = preview.headers,
+                        muted = true,
+                    )
+                    IntercomFileLogger.i(TAG, "Opening Proptech RTSP preview")
+                    return@launch
                 }
-                playRtspOnView(
-                    view = playbackView,
-                    url = preview.rtspUrl,
-                    headers = preview.headers,
-                    muted = true,
-                )
-                IntercomFileLogger.i(TAG, "Started RTSP preview url=${preview.rtspUrl}")
-                return@launch
-            }
 
-            clearRemotePreviewPlayback()
-            binding.remotePreviewContainer.visibility = View.GONE
-            binding.remoteVideoSurface.visibility = View.VISIBLE
-            IntercomFileLogger.i(TAG, "No live RTSP preview, binding SIP video surface instead")
-            SipCoreManager.attachVideoWindows(binding.remoteVideoSurface, null)
+                IntercomFileLogger.w(
+                    TAG,
+                    "Proptech RTSP preview unavailable; retrying in ${PROPTECH_PREVIEW_RETRY_DELAY_MS}ms",
+                )
+                delay(PROPTECH_PREVIEW_RETRY_DELAY_MS)
+            }
         }
+    }
+
+    private fun showSipVideo(accountId: String?) {
+        stopPreviewRefresh()
+        clearRemotePreviewPlayback()
+        binding.previewLoadingIndicator.visibility = View.GONE
+        binding.remotePreviewContainer.visibility = View.GONE
+        binding.remoteVideoSurface.visibility = View.VISIBLE
+        IntercomFileLogger.i(TAG, "Binding SIP video surface for non-Proptech accountId=${accountId ?: "<none>"}")
+        SipCoreManager.attachVideoWindows(binding.remoteVideoSurface, null)
+    }
+
+    private fun stopPreviewRefresh() {
+        previewRefreshRequestId++
+        previewRefreshJob?.cancel()
+        previewRefreshJob = null
+        previewRefreshAccountId = null
     }
 
     private fun clearRemotePreviewPlayback() {
@@ -273,6 +331,7 @@ class IncomingCallActivity : AppCompatActivity() {
             binding.remotePreviewContainer.removeView(view)
         }
         previewPlaybackView = null
+        binding.previewLoadingIndicator.visibility = View.GONE
     }
 
     private fun applyWindowInsets() {
@@ -302,15 +361,6 @@ class IncomingCallActivity : AppCompatActivity() {
         incomingCallSoundAccountId = accountId
         IntercomFileLogger.i(TAG, "Resolving incoming call sound for accountId=$accountId")
         incomingCallSound = resolveIncomingCallSoundForAccount(accountId)
-    }
-
-    private fun getCurrentAccount() = SipCoreManager.getCurrentCallAccountId()?.let { accountId ->
-        appContainer.sipAccountRepository.accounts.value.firstOrNull { it.id == accountId }
-    }.also { account ->
-        IntercomFileLogger.d(
-            TAG,
-            "getCurrentAccount resolved accountId=${account?.id ?: "<none>"}",
-        )
     }
 
     private fun resolveIncomingCallSoundForAccount(accountId: String?): IncomingCallSound? {

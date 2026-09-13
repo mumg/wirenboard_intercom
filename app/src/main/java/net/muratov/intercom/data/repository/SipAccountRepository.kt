@@ -21,6 +21,10 @@ class SipAccountRepository(
 
     val accounts: StateFlow<List<SipAccountConfig>> = _accounts.asStateFlow()
 
+    fun getProviderType(accountId: String): String? {
+        return sources.firstOrNull { it.id == accountId }?.provider?.type
+    }
+
     suspend fun refresh() {
         val resolvedAccounts = sources.mapNotNull { source ->
             runCatching {

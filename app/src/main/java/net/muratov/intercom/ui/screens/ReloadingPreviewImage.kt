@@ -19,6 +19,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 private const val PREVIEW_HTTP_TAG = "IntercomHttpPreview"
+private const val PREVIEW_RETRY_DELAY_MS = 5_000L
 
 @Composable
 fun ReloadingPreviewImage(
@@ -28,12 +29,20 @@ fun ReloadingPreviewImage(
     modifier: Modifier = Modifier,
 ) {
     val bitmapState = produceState<Bitmap?>(initialValue = null, url, headers, reloadPeriodMs) {
-        do {
-            value = loadBitmap(url, headers)
+        while (true) {
+            val bitmap = loadBitmap(url, headers)
+            if (bitmap != null) {
+                value = bitmap
+            }
             val period = reloadPeriodMs
-            if (period == null || period <= 0L) break
-            delay(period)
-        } while (true)
+            if (period != null && period > 0L) {
+                delay(period)
+            } else if (bitmap == null) {
+                delay(PREVIEW_RETRY_DELAY_MS)
+            } else {
+                break
+            }
+        }
     }
 
     Box(
