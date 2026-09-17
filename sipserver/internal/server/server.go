@@ -24,6 +24,8 @@ import (
 	"sipserver/internal/registrar"
 )
 
+const udpInviteAutoTCPThreshold = 1300
+
 type Server struct {
 	cfg *config.Config
 
@@ -31,8 +33,10 @@ type Server struct {
 	srv      *sipgo.Server
 	logger   *slog.Logger
 	logClose io.Closer
+
 	bindings map[string]*binding
 	users    map[string]config.UserConfig
+	external []*externalAccount
 
 	auth      *auth.Manager
 	registrar *registrar.Store
@@ -62,6 +66,7 @@ type callSession struct {
 	callerContact  sip.Uri
 	callerFrom     sip.FromHeader
 	callerTo       sip.ToHeader
+	branchFrom     sip.FromHeader
 	callerTag      string
 	callerByeSeq   uint32
 
@@ -182,6 +187,24 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 	}
 
+	for _, accountCfg := range cfg.ExternalAccounts {
+		bind := s.bindings[accountCfg.Interface]
+		if bind == nil {
+			_ = s.ua.Close()
+			return nil, fmt.Errorf("external account %q references unknown binding %q", accountCfg.Name, accountCfg.Interface)
+		}
+		callerUser, ok := s.users[accountCfg.Caller]
+		if !ok {
+			_ = s.ua.Close()
+			return nil, fmt.Errorf("external account %q references unknown caller %q", accountCfg.Name, accountCfg.Caller)
+		}
+		s.external = append(s.external, &externalAccount{
+			cfg:    accountCfg,
+			bind:   bind,
+			caller: callerUser,
+		})
+	}
+
 	s.logger.Info("detailed SIP logging enabled", "realm", cfg.Realm, "sip_debug", true)
 	s.registerHandlers()
 	return s, nil
@@ -206,6 +229,14 @@ func (s *Server) Start(ctx context.Context) error {
 			}
 		}(bind)
 		s.logger.Info("SIP listener started", "interface", bind.cfg.Name, "listen", bind.cfg.SIPListen, "advertise_ip", bind.cfg.AdvertiseIP, "media_ip", bind.cfg.MediaIP, "subnet", bind.cfg.Subnet)
+	}
+
+	for _, account := range s.external {
+		wg.Add(1)
+		go func(account *externalAccount) {
+			defer wg.Done()
+			s.runExternalRegistrationLoop(ctx, account)
+		}(account)
 	}
 
 	select {
@@ -315,6 +346,11 @@ func (s *Server) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 
+	if account := s.matchExternalAccount(bind, req); account != nil {
+		s.handleExternalInvite(account, req, tx)
+		return
+	}
+
 	callerFrom := req.From()
 	if callerFrom == nil || callerFrom.Address.User == "" {
 		s.logger.Warn("invite rejected: invalid from", "interface", bind.cfg.Name, "call_id", callID(req))
@@ -323,17 +359,6 @@ func (s *Server) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 
 	callerUser := callerFrom.Address.User
-	if _, ok := s.users[callerUser]; !ok {
-		s.logger.Warn("invite rejected: unknown caller", "caller", callerUser, "call_id", callID(req))
-		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusForbidden, "Unknown Caller", nil))
-		return
-	}
-	if len(s.registrar.GetByUser(callerUser)) == 0 {
-		s.logger.Warn("invite rejected: caller not registered", "caller", callerUser, "call_id", callID(req))
-		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusForbidden, "Caller Not Registered", nil))
-		return
-	}
-
 	targetUser := req.Recipient.User
 	if targetUser == "" && req.To() != nil {
 		targetUser = req.To().Address.User
@@ -344,26 +369,53 @@ func (s *Server) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 
+	s.startInboundCall(req, tx, inboundCallSpec{
+		bind:                    bind,
+		callerUser:              callerUser,
+		targetUser:              targetUser,
+		signalingFrom:           *cloneFromHeader(callerFrom),
+		signalingTo:             *cloneToHeader(req.To()),
+		branchFrom:              *cloneFromHeader(callerFrom),
+		requireRegisteredCaller: true,
+		route:                   "local-registrar",
+	})
+}
+
+func (s *Server) startInboundCall(req *sip.Request, tx sip.ServerTransaction, spec inboundCallSpec) {
+	callerUser := spec.callerUser
+	targetUser := spec.targetUser
+
+	if _, ok := s.users[callerUser]; !ok {
+		s.logger.Warn("invite rejected: unknown caller", "caller", callerUser, "call_id", callID(req), "route", spec.route)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusForbidden, "Unknown Caller", nil))
+		return
+	}
+	if spec.requireRegisteredCaller && len(s.registrar.GetByUser(callerUser)) == 0 {
+		s.logger.Warn("invite rejected: caller not registered", "caller", callerUser, "call_id", callID(req), "route", spec.route)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusForbidden, "Caller Not Registered", nil))
+		return
+	}
+
 	targets := s.resolveTargets(callerUser, targetUser)
 	if len(targets) == 0 {
-		s.logger.Warn("invite rejected: no registered targets", "caller", callerUser, "target", targetUser, "call_id", callID(req))
+		s.logger.Warn("invite rejected: no registered targets", "caller", callerUser, "target", targetUser, "call_id", callID(req), "route", spec.route)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusNotFound, "Target Not Registered", nil))
 		return
 	}
 
 	callerRemoteMedia, err := media.ExtractMediaEndpoints(req.Body())
 	if err != nil {
-		s.logger.Warn("invite rejected: invalid media offer", "caller", callerUser, "target", targetUser, "call_id", callID(req), "error", err)
+		s.logger.Warn("invite rejected: invalid media offer", "caller", callerUser, "target", targetUser, "call_id", callID(req), "route", spec.route, "error", err)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusNotAcceptableHere, "SDP Offer Required", nil))
 		return
 	}
 
 	mediaSession, err := media.NewSession(s.randomID("media"), s.ports, media.Binding{
-		Name:    bind.cfg.Name,
-		MediaIP: bind.cfg.MediaIP,
+		Name:    spec.bind.cfg.Name,
+		MediaIP: spec.bind.cfg.MediaIP,
 	}, callerRemoteMedia)
 	if err != nil {
-		s.logger.Error("invite rejected: media session create failed", "caller", callerUser, "target", targetUser, "call_id", callID(req), "error", err)
+		s.logger.Error("invite rejected: media session create failed", "caller", callerUser, "target", targetUser, "call_id", callID(req), "route", spec.route, "error", err)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusInternalServerError, "Media Proxy Error", nil))
 		return
 	}
@@ -371,7 +423,7 @@ func (s *Server) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	contact := req.Contact()
 	if contact == nil {
 		mediaSession.Close()
-		s.logger.Warn("invite rejected: missing contact", "caller", callerUser, "call_id", callID(req))
+		s.logger.Warn("invite rejected: missing contact", "caller", callerUser, "call_id", callID(req), "route", spec.route)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusBadRequest, "Missing Contact", nil))
 		return
 	}
@@ -380,11 +432,12 @@ func (s *Server) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 		id:             s.randomID("call"),
 		originalInvite: req.Clone(),
 		inviteTx:       tx,
-		callerBinding:  bind,
+		callerBinding:  spec.bind,
 		callerCallID:   callID(req),
 		callerContact:  *contact.Address.Clone(),
-		callerFrom:     *callerFrom,
-		callerTo:       *cloneToHeader(req.To()),
+		callerFrom:     spec.signalingFrom,
+		callerTo:       spec.signalingTo,
+		branchFrom:     spec.branchFrom,
 		callerTag:      randomHex(8),
 		callerByeSeq:   req.CSeq().SeqNo + 1,
 		target:         targetUser,
@@ -396,7 +449,7 @@ func (s *Server) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	s.mu.Lock()
 	s.callsByCaller[call.callerCallID] = call
 	s.mu.Unlock()
-	s.logger.Info("call created", "call_id", call.callerCallID, "internal_call_id", call.id, "caller", callerUser, "target", targetUser, "interface", bind.cfg.Name, "targets_count", len(targets), "caller_contact", contact.Value(), "media_offer", fmt.Sprintf("%v", callerRemoteMedia))
+	s.logger.Info("call created", "call_id", call.callerCallID, "internal_call_id", call.id, "caller", callerUser, "target", targetUser, "interface", spec.bind.cfg.Name, "targets_count", len(targets), "caller_contact", contact.Value(), "route", spec.route, "media_offer", fmt.Sprintf("%v", callerRemoteMedia))
 
 	_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusTrying, "Trying", nil))
 
@@ -410,7 +463,7 @@ func (s *Server) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 
 	if created == 0 {
-		s.logger.Warn("call failed: no reachable targets", "call_id", call.callerCallID, "caller", callerUser, "target", targetUser)
+		s.logger.Warn("call failed: no reachable targets", "call_id", call.callerCallID, "caller", callerUser, "target", targetUser, "route", spec.route)
 		resp := s.newCallerResponse(call, sip.StatusTemporarilyUnavailable, "No Reachable Targets", nil)
 		_ = tx.Respond(resp)
 		call.finalSent = true
@@ -543,6 +596,20 @@ func (s *Server) startBranch(call *callSession, reg registrar.Registration) erro
 
 	invite := buildBranchInvite(call, branchBind, contactURI, outboundSDP)
 	invite.Laddr = branchBind.local
+	inviteSize := len(invite.String())
+
+	if shouldUseTCPForInvite(invite, inviteSize) {
+		switchInviteToTCP(invite)
+		s.logger.Info("branch invite switched to TCP because SIP message exceeds safe UDP size",
+			"call_id", call.callerCallID,
+			"branch_id", branchID,
+			"target_user", reg.Username,
+			"interface", branchBind.cfg.Name,
+			"size_bytes", inviteSize,
+			"threshold", udpInviteAutoTCPThreshold,
+			"destination", invite.Destination(),
+		)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	tx, err := branchBind.client.TransactionRequest(ctx, invite)
@@ -571,7 +638,7 @@ func (s *Server) startBranch(call *callSession, reg registrar.Registration) erro
 	s.mu.Lock()
 	s.branchByCallID[branch.callID] = branch
 	s.mu.Unlock()
-	s.logger.Info("branch created", "call_id", call.callerCallID, "branch_id", branch.id, "branch_call_id", branch.callID, "target_user", reg.Username, "interface", branchBind.cfg.Name, "contact", reg.Contact, "media_endpoints", fmt.Sprintf("%v", rtpEndpoints))
+	s.logger.Info("branch created", "call_id", call.callerCallID, "branch_id", branch.id, "branch_call_id", branch.callID, "target_user", reg.Username, "interface", branchBind.cfg.Name, "transport", invite.Transport(), "invite_size", inviteSize, "contact", reg.Contact, "media_endpoints", fmt.Sprintf("%v", rtpEndpoints))
 
 	go s.watchBranchResponses(branch, cancel)
 	return nil
@@ -644,6 +711,12 @@ func (s *Server) handleBranchFinal(branch *callBranch, res *sip.Response) {
 	}
 
 	if res.IsSuccess() {
+		if call.finalSent && call.winner == nil {
+			s.logger.Info("late 2xx received after call was already failed", "call_id", call.callerCallID, "branch_id", branch.id, "branch_call_id", branch.callID)
+			go s.ackAndByeLateBranch(branch)
+			return
+		}
+
 		if call.winner != nil && call.winner.id != branch.id {
 			s.logger.Info("late 2xx received on non-winning branch", "call_id", call.callerCallID, "branch_id", branch.id, "winner_branch_id", call.winner.id)
 			go s.ackAndByeLateBranch(branch)
@@ -690,6 +763,28 @@ func (s *Server) handleBranchFinal(branch *callBranch, res *sip.Response) {
 	}
 	s.logger.Info("branch failed", "call_id", call.callerCallID, "branch_id", branch.id, "branch_call_id", branch.callID, "status", res.StatusCode, "reason", res.Reason)
 	call.media.RemoveBranch(branch.id)
+
+	if call.finalSent || call.winner != nil || !terminatesForkOnFailure(res.StatusCode) {
+		return
+	}
+
+	s.logger.Info("branch rejection terminates whole call", "call_id", call.callerCallID, "branch_id", branch.id, "branch_call_id", branch.callID, "status", res.StatusCode, "reason", res.Reason)
+	resp := s.newCallerResponse(call, res.StatusCode, res.Reason, nil)
+	_ = call.inviteTx.Respond(resp)
+	call.finalSent = true
+	call.notifyFinal(false)
+
+	for _, other := range call.branches {
+		if other.id == branch.id || other.final || other.cancelled {
+			continue
+		}
+		other.cancelled = true
+		cancelReq := buildCancelRequest(other.invite)
+		s.logger.Info("cancelling branch because another callee rejected the call", "call_id", call.callerCallID, "rejected_branch_id", branch.id, "branch_id", other.id, "branch_call_id", other.callID)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _ = other.binding.client.TransactionRequest(ctx, cancelReq)
+		cancel()
+	}
 }
 
 func (c *callSession) maybeFinalizeFailure(s *Server) {
@@ -888,6 +983,12 @@ func (s *Server) resolveTargets(callerUser, targetUser string) []registrar.Regis
 }
 
 func (s *Server) bindingForRequest(req *sip.Request) *binding {
+	for _, bind := range s.bindings {
+		if requestMatchesBindingDestination(req, bind) {
+			return bind
+		}
+	}
+
 	host, _, err := net.SplitHostPort(req.Source())
 	if err != nil {
 		host = req.Source()
@@ -957,11 +1058,12 @@ func (s *Server) newCallerResponse(call *callSession, status int, reason string,
 
 func buildBranchInvite(call *callSession, bind *binding, contact sip.Uri, sdp []byte) *sip.Request {
 	req := sip.NewRequest(sip.INVITE, contact)
-	req.SetTransport("UDP")
+	enableCompactHeaders(req)
+	req.SetTransport(branchInviteTransport(contact))
 	req.AppendHeader(&sip.FromHeader{
-		DisplayName: call.callerFrom.DisplayName,
-		Address:     *call.callerFrom.Address.Clone(),
-		Params:      cloneParams(call.callerFrom.Params),
+		DisplayName: call.branchFrom.DisplayName,
+		Address:     *call.branchFrom.Address.Clone(),
+		Params:      cloneParams(call.branchFrom.Params),
 	})
 	if from := req.From(); from != nil {
 		if from.Params == nil {
@@ -990,8 +1092,39 @@ func buildBranchInvite(call *callSession, bind *binding, contact sip.Uri, sdp []
 	return req
 }
 
+func branchInviteTransport(contact sip.Uri) string {
+	if contact.UriParams != nil {
+		if transport, ok := contact.UriParams.Get("transport"); ok && transport != "" {
+			return strings.ToUpper(transport)
+		}
+	}
+	return "UDP"
+}
+
+func enableCompactHeaders(req *sip.Request) {
+	req.CompactHeaders = true
+}
+
+func shouldUseTCPForInvite(invite *sip.Request, size int) bool {
+	return invite.Transport() == "UDP" && size > udpInviteAutoTCPThreshold
+}
+
+func switchInviteToTCP(invite *sip.Request) {
+	invite.SetTransport("TCP")
+	if invite.Recipient.UriParams != nil {
+		invite.Recipient.UriParams.Remove("transport")
+	}
+	if to := invite.To(); to != nil && to.Address.UriParams != nil {
+		to.Address.UriParams.Remove("transport")
+	}
+	if contact := invite.Contact(); contact != nil && contact.Address.UriParams != nil {
+		contact.Address.UriParams.Add("transport", "tcp")
+	}
+}
+
 func buildCancelRequest(invite *sip.Request) *sip.Request {
 	req := sip.NewRequest(sip.CANCEL, *invite.Recipient.Clone())
+	enableCompactHeaders(req)
 	req.SetTransport(invite.Transport())
 	req.SetSource(invite.Source())
 	req.SetDestination(invite.Destination())
@@ -1018,6 +1151,7 @@ func buildACKRequest(invite *sip.Request, remoteTo *sip.ToHeader, contact sip.Ur
 	}
 
 	req := sip.NewRequest(sip.ACK, target)
+	enableCompactHeaders(req)
 	req.SetTransport(invite.Transport())
 	req.SetSource(invite.Source())
 	req.SetDestination(uriDestination(target, invite.Transport()))
@@ -1045,6 +1179,7 @@ func buildByeRequest(invite *sip.Request, remoteTo *sip.ToHeader, contact sip.Ur
 	}
 
 	req := sip.NewRequest(sip.BYE, target)
+	enableCompactHeaders(req)
 	req.SetTransport(invite.Transport())
 	req.SetSource(invite.Source())
 	req.SetDestination(uriDestination(target, invite.Transport()))
@@ -1073,6 +1208,7 @@ func buildByeRequest(invite *sip.Request, remoteTo *sip.ToHeader, contact sip.Ur
 func buildCallerBye(call *callSession) (*sip.Request, error) {
 	target := *call.callerContact.Clone()
 	req := sip.NewRequest(sip.BYE, target)
+	enableCompactHeaders(req)
 	req.SetTransport("UDP")
 	req.SetDestination(uriDestination(target, "UDP"))
 	req.Laddr = call.callerBinding.local
@@ -1185,6 +1321,15 @@ func cloneToHeader(h *sip.ToHeader) *sip.ToHeader {
 	return &cloned
 }
 
+func cloneFromHeader(h *sip.FromHeader) *sip.FromHeader {
+	if h == nil {
+		return &sip.FromHeader{}
+	}
+	to := h.AsTo()
+	cloned := (&to).AsFrom()
+	return &cloned
+}
+
 func cloneParams(params sip.HeaderParams) sip.HeaderParams {
 	if params == nil {
 		return nil
@@ -1216,6 +1361,15 @@ func betterFailure(newCode, current int) bool {
 		return true
 	}
 	return newCode > current
+}
+
+func terminatesForkOnFailure(code int) bool {
+	switch code {
+	case sip.StatusBusyHere, sip.StatusGlobalBusyEverywhere, sip.StatusGlobalDecline:
+		return true
+	default:
+		return false
+	}
 }
 
 func randomHex(n int) string {
