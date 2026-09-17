@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashRestartReceiver.dismissRecoveryNotification(this)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
         composeHost = findViewById(R.id.composeHost)

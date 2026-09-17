@@ -292,11 +292,9 @@ private class VlcPlaybackView(
             when (event.type) {
                 MediaPlayer.Event.Playing -> {
                     cancelReconnect()
-                    applyVolume()
                     onPlaybackStarted?.invoke()
                 }
 
-                MediaPlayer.Event.ESAdded -> applyVolume()
                 MediaPlayer.Event.Buffering -> scheduleReconnect(CONNECTION_TIMEOUT_MS, replacePending = false)
                 MediaPlayer.Event.EndReached,
                 MediaPlayer.Event.EncounteredError,
@@ -348,9 +346,9 @@ private class VlcPlaybackView(
             }
             mediaPlayer.media = media
             media.release()
+            applyVolume()
             scheduleReconnect(CONNECTION_TIMEOUT_MS)
             mediaPlayer.play()
-            applyVolume()
         } catch (error: Exception) {
             Log.w(TAG, "Unable to start VLC stream; reconnect scheduled", error)
             scheduleReconnect(RECONNECT_DELAY_MS)
@@ -360,9 +358,6 @@ private class VlcPlaybackView(
     private fun applyVolume() {
         val muted = currentMuted == true
         mediaPlayer.setVolume(if (muted) 0 else 100)
-        if (muted) {
-            mediaPlayer.setAudioTrack(-1)
-        }
     }
 
     private fun scheduleReconnect(delayMs: Long, replacePending: Boolean = true) {
